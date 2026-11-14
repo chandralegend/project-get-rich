@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Keeps the Mac from sleeping while on power, without sudo. `caffeinate -s` only holds while on AC. -->
+<dict>
+  <key>Label</key><string>com.getrich.caffeinate</string>
+  <key>ProgramArguments</key>
+  <array><string>/usr/bin/caffeinate</string><string>-s</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict>
+</plist>
