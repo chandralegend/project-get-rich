@@ -141,7 +141,7 @@ Bitemporal news table: `published_at` (source claim) and `ingested_at` (your clo
 - **Forecasting-model contamination:** Chronos-2 and TimesFM were pretrained on large corpora that may include your test periods. I haven't checked their training windows, so also evaluate the forecast channel on periods after their release dates.
 - Purge and embargo by label horizon; MLflow logs every experiment so the trial count for Deflated Sharpe is honest.
 
-**Compute on M4 16 GB.** Embeddings run as a nightly batch, and the fusion net trains in minutes. Chronos-2, TimesFM 2.5 and TinyTimeMixer all fit [track 10]. Retraining runs overnight, one heavy job at a time.
+**Compute on M4 16 GB.** Measured on 2026-11-14 (`docs/benchmark-m4.md`): a 39k-parameter GRU trains at about 14k samples/s on PyTorch MPS and a 0.8M-parameter Transformer at about 1.6k to 3.4k samples/s on any backend, with peak memory under 800 MiB. Use PyTorch (MPS for GRU or TCN) as the default; MLX is for inference of ported models. Embeddings run as a nightly batch. Chronos-2, TimesFM 2.5 and TinyTimeMixer all fit [track 10]. Retraining runs overnight, one heavy job at a time.
 
 ### 4.4 Risk gate
 

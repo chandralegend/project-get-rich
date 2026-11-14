@@ -62,6 +62,9 @@ def run() -> list[tuple[str, str, str]]:
     rows.append(("OK" if os.environ.get("GETRICH_HEARTBEAT_URL") else "TODO", "external heartbeat",
                  "GETRICH_HEARTBEAT_URL set" if os.environ.get("GETRICH_HEARTBEAT_URL")
                  else "not set: create a dead-man's-switch check yourself and put its ping URL in .env"))
+    libomp = any(os.path.exists(p) for p in ("/opt/homebrew/opt/libomp/lib/libomp.dylib", "/usr/local/opt/libomp/lib/libomp.dylib"))
+    rows.append(("OK" if libomp else "TODO", "libomp (LightGBM)",
+                 "found" if libomp else "missing: run `brew install libomp` before Phase 2 (LightGBM needs it)"))
     rows.append(("OK" if os.environ.get("ANTHROPIC_API_KEY") else "TODO", "Anthropic key",
                  "set" if os.environ.get("ANTHROPIC_API_KEY") else "not set (needed from Phase 3; put it in .env)"))
     return rows
