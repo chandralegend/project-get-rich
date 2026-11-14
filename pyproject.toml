@@ -11,10 +11,13 @@ dependencies = [
     "pytz",  # DuckDB needs it to return timezone-aware timestamps to Python
     "numpy>=2.0",
     "pandas>=2.2",
+    "anthropic>=2.8.0",
+    "claude-agent-sdk>=0.2.182",
 ]
 
 [dependency-groups]
 dev = ["pytest>=8"]
+ml = ["torch>=2.5", "lightgbm>=4.5"]
 
 [project.scripts]
 getrich = "getrich.cli:main"
@@ -25,6 +28,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/getrich"]
+
+[tool.uv]
+default-groups = ["dev", "ml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,104 @@
+[
+  {
+    "phase": 1,
+    "name": "BTCUSDT:buy_and_hold",
+    "sharpe_annual": 0.49,
+    "source": "docs/phase1-baselines.md"
+  },
+  {
+    "phase": 1,
+    "name": "BTCUSDT:trend",
+    "sharpe_annual": 0.63,
+    "source": "docs/phase1-baselines.md"
+  },
+  {
+    "phase": 1,
+    "name": "BTCUSDT:trend_ewma",
+    "sharpe_annual": 0.43,
+    "source": "docs/phase1-baselines.md"
+  },
+  {
+    "phase": 1,
+    "name": "BTCUSDT:trend_har",
+    "sharpe_annual": 0.36,
+    "source": "docs/phase1-baselines.md"
+  },
+  {
+    "phase": 1,
+    "name": "ETHUSDT:buy_and_hold",
+    "sharpe_annual": 0.45,
+    "source": "docs/phase1-baselines.md"
+  },
+  {
+    "phase": 1,
+    "name": "ETHUSDT:trend",
+    "sharpe_annual": 0.54,
+    "source": "docs/phase1-baselines.md"
+  },
+  {
+    "phase": 1,
+    "name": "ETHUSDT:trend_ewma",
+    "sharpe_annual": 0.45,
+    "source": "docs/phase1-baselines.md"
+  },
+  {
+    "phase": 1,
+    "name": "ETHUSDT:trend_har",
+    "sharpe_annual": 0.31,
+    "source": "docs/phase1-baselines.md"
+  },
+  {
+    "phase": 2,
+    "name": "pinet-v1:linear",
+    "sharpe_annual": 0.24,
+    "source": "docs/phase2-results.md"
+  },
+  {
+    "phase": 2,
+    "name": "pinet-v1:lgbm",
+    "sharpe_annual": 0.09,
+    "source": "docs/phase2-results.md"
+  },
+  {
+    "phase": 2,
+    "name": "pinet-v1:fusion",
+    "sharpe_annual": 0.18,
+    "source": "docs/phase2-results.md"
+  },
+  {
+    "phase": 2,
+    "name": "pinet-v1:baseline_trend",
+    "sharpe_annual": 0.66,
+    "source": "docs/phase2-results.md"
+  },
+  {
+    "phase": 2,
+    "name": "pinet-v1:baseline_buy_and_hold",
+    "sharpe_annual": 0.53,
+    "source": "docs/phase2-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "meta-trend-v1:linear",
+    "sharpe_annual": 0.2837,
+    "source": "docs/phase3-meta-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "meta-trend-v1:lgbm",
+    "sharpe_annual": 0.6468,
+    "source": "docs/phase3-meta-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "meta-trend-v1:fusion",
+    "sharpe_annual": 0.1027,
+    "source": "docs/phase3-meta-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "meta-trend-v1:primary_alone",
+    "sharpe_annual": 0.6806,
+    "source": "docs/phase3-meta-results.md"
+  }
+]

@@ -110,3 +110,30 @@ def test_watchdog_writes_its_own_heartbeat():
     from getrich.obs.heartbeat import read
 
     assert read("watchdog")["ok"] is True
+
+
+def test_claude_spend_alerts_at_80_percent_and_at_the_cap(monkeypatch):
+    from getrich.obs.events import emit
+
+    monkeypatch.setenv("GETRICH_CLAUDE_MONTHLY_CAP_USD", "1.00")
+    assert "claude_budget_80" not in _alerts(watchdog.check())
+    emit("llm.call", service="llm", cost_usd=0.85)
+    a = _alerts(watchdog.check())
+    assert a["claude_budget_80"].severity == "P1" and "claude_budget_exhausted" not in a
+    emit("llm.call", service="llm", cost_usd=0.20)
+    a = _alerts(watchdog.check())
+    assert a["claude_budget_exhausted"].severity == "P1" and "claude_budget_80" not in a
+
+
+def test_the_status_screen_shows_claude_spend(monkeypatch):
+    from rich.console import Console
+
+    from getrich.obs import status
+    from getrich.obs.events import emit
+
+    monkeypatch.setenv("GETRICH_CLAUDE_MONTHLY_CAP_USD", "30")
+    emit("llm.call", service="llm", cost_usd=1.5)
+    console = Console(record=True, width=140)
+    status.render(console)
+    text = console.export_text()          # export_text clears the buffer, so read it once
+    assert "$1.50" in text and "of $30.00" in text

@@ -52,3 +52,18 @@ def test_heartbeat_keeps_last_ok_when_a_run_fails():
     hb = read("svc")
     assert hb["ok"] is False
     assert hb["last_ok_ts"] == first_ok
+
+
+def test_nested_database_access_fails_fast_with_a_clear_message_instead_of_hanging():
+    import time
+
+    import pytest
+
+    start = time.monotonic()
+    with connect():
+        with pytest.raises(RuntimeError, match="not re-entrant"):
+            with connect():
+                pass
+    assert time.monotonic() - start < 5        # not the 30-second lock timeout
+    with connect():                              # and the lock is released afterwards
+        pass

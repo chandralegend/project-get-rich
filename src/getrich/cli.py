@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from . import config
@@ -30,6 +31,25 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("ledger-verify", help="verify the insight ledger's hash chain")
     sub.add_parser("validate-harness", help="prove the evaluation harness can tell skill from luck (synthetic controls)")
     sub.add_parser("run-baselines", help="run the baseline strategies on stored BTC/ETH data and print the report")
+    p2 = sub.add_parser("run-phase2", help="evaluate the PI-Net v1 models on real data against the baselines")
+    p2.add_argument("--null-linear", type=int, default=100)
+    p2.add_argument("--null-lgbm", type=int, default=40)
+    p2.add_argument("--null-fusion", type=int, default=0)
+    p2.add_argument("--write", action="store_true", help="write docs/phase2-results.md")
+    ae = sub.add_parser("agents-extract", help="pre-filter new news and classify it with Haiku into the insight ledger")
+    ae.add_argument("--limit", type=int, default=40)
+    ae.add_argument("--dry-run", action="store_true", help="no API call, no changes: show counts and estimated cost")
+    ab = sub.add_parser("agents-briefing", help="write the daily briefing, risk flags and shadow views with Sonnet")
+    ab.add_argument("--hours", type=int, default=24)
+    ab.add_argument("--dry-run", action="store_true")
+    inv = sub.add_parser("investigate", help="shadow-only research agent (Claude Agent SDK, locked down): web search and fetch plus read-only market tools")
+    inv.add_argument("question")
+    inv.add_argument("--max-usd", type=float, default=0.75, help="hard cost limit for this run")
+    inv.add_argument("--max-turns", type=int, default=15)
+    inv.add_argument("--dry-run", action="store_true", help="no agent is started: show the lockdown configuration that would be used")
+    sub.add_parser("agents-score", help="score matured shadow views and risk flags against what prices did")
+    sub.add_parser("agents-status", help="Claude spend against the cap, ledger contents and the scorecard")
+    sub.add_parser("run-meta", help="run the pre-registered meta-label experiment and judge it by its own criteria")
     d = sub.add_parser("derive-limits", help="derive proposed risk limits from the baseline strategy's history")
     d.add_argument("--write", action="store_true", help="write docs/risk-limits-proposal.md and config/limits.proposed.toml")
     la = sub.add_parser("limits-approve", help="approve a risk-limit profile: writes config/limits.toml and logs the decision")
@@ -101,6 +121,80 @@ def main(argv: list[str] | None = None) -> int:
 
         res = baseline_report.run()
         print(baseline_report.to_markdown(res))
+        return 0
+    if args.cmd in ("agents-extract", "agents-briefing") and not getattr(args, "dry_run", False):
+        import os
+
+        if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+            print("No Anthropic credentials found. Add ANTHROPIC_API_KEY=... to the gitignored .env file in the project folder. "
+                  "Use a key created just for this project, with a spend limit set in the Claude Console.")
+            return 2
+    if args.cmd == "investigate":
+        import os
+
+        from .agents import investigator
+
+        if not args.dry_run and not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+            print("No Anthropic credentials found. Unattended and scripted runs need an API key (ANTHROPIC_API_KEY in the gitignored .env), "
+                  "created just for this project with a spend limit in the Claude Console.")
+            return 2
+        res = investigator.investigate(args.question, max_usd=args.max_usd, max_turns=args.max_turns, dry_run=args.dry_run)
+        print(json.dumps(res, indent=2, default=str) if res.get("status") == "dry_run" else res)
+        if res.get("path"):
+            print(open(res["path"]).read())
+        return 0 if res.get("status") in ("recorded", "dry_run") else 1
+    if args.cmd == "agents-extract":
+        from .agents import extract
+
+        res = extract.extract_pending(limit=args.limit, dry_run=args.dry_run)
+        print(res)
+        return 0
+    if args.cmd == "agents-briefing":
+        from .agents import briefing
+
+        res = briefing.run(hours=args.hours, dry_run=args.dry_run)
+        print(res)
+        if res.get("path"):
+            print(open(res["path"]).read())
+        return 0
+    if args.cmd == "agents-score":
+        from .agents import scoring
+
+        print(scoring.score())
+        return 0
+    if args.cmd == "agents-status":
+        from .agents import scoring
+        from .llm import budget
+        from .store.db import connect
+
+        with connect() as con:
+            spent, cap = budget.month_spend_con(con), budget.monthly_cap()
+            kinds = con.execute("SELECT json_extract_string(payload, '$.kind'), count(*) FROM insights GROUP BY 1 ORDER BY 1").fetchall()
+            status_counts = con.execute("SELECT status, count(*) FROM item_processing GROUP BY 1 ORDER BY 1").fetchall()
+            card = scoring.scorecard(con)
+        print(f"Claude spend this month: ${spent:.4f} of ${cap:.2f} ({spent / cap:.0%})")
+        print("ledger:", dict(kinds) or "empty")
+        print("news items:", dict(status_counts) or "none processed")
+        print("scorecard:", card)
+        return 0
+    if args.cmd == "run-meta":
+        from .eval import meta_report
+
+        res = meta_report.run()
+        text = meta_report.to_markdown(res)
+        print(text)
+        (config.root() / "docs" / "phase3-meta-results.md").write_text(text)
+        print("wrote docs/phase3-meta-results.md")
+        return 0
+    if args.cmd == "run-phase2":
+        from .eval import phase2_report
+
+        res = phase2_report.run({"linear": args.null_linear, "lgbm": args.null_lgbm, "fusion": args.null_fusion})
+        text = phase2_report.to_markdown(res)
+        print(text)
+        if args.write:
+            (config.root() / "docs" / "phase2-results.md").write_text(text)
+            print("wrote docs/phase2-results.md")
         return 0
     if args.cmd == "derive-limits":
         from pathlib import Path

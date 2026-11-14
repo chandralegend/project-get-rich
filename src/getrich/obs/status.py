@@ -10,6 +10,7 @@ from rich.table import Table
 
 from .. import config
 from ..store.db import connect
+from ..llm.budget import month_spend_con, monthly_cap
 from ..store.ledger import count_insights, verify_chain
 from ..ops.watchdog import EXPECTED_MAX_AGE
 from .events import parse_ts, utcnow
@@ -60,6 +61,7 @@ def build_lines() -> list[tuple[str, str]]:
             "WHERE event = 'alert.raised' AND ts > now() - INTERVAL 1 DAY GROUP BY 1"
         ).fetchall()
         ledger_n = count_insights(con)
+        claude_spent = month_spend_con(con)
         chain_ok, _, bad_seq = verify_chain(con)
 
     if bars:
@@ -73,7 +75,9 @@ def build_lines() -> list[tuple[str, str]]:
         lines.append(("NEWS", f"0 new in 24h · {news_total} total"))
 
     chain_txt = "[green]chain intact[/]" if chain_ok else f"[red]CHAIN BROKEN at seq {bad_seq}[/]"
-    lines.append(("AGENTS", f"insight ledger {ledger_n} insights · {chain_txt} · [dim]agents arrive in Phase 3[/]"))
+    cap = monthly_cap()
+    spend_style = "red" if claude_spent >= cap else "yellow" if claude_spent >= 0.8 * cap else "green"
+    lines.append(("AGENTS", f"insight ledger {ledger_n} insights · {chain_txt} · Claude [{spend_style}]${claude_spent:.2f}[/] of ${cap:.2f} this month"))
     for key, text in NOT_BUILT.items():
         lines.append((key, f"[dim]{text}[/]"))
 

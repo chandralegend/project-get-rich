@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Scoring uses only local data and costs nothing. Daily at 07:00 local time. -->
+<dict>
+  <key>Label</key><string>com.getrich.agents-score</string>
+  <key>ProgramArguments</key>
+  <array><string>__PROJECT__/.venv/bin/getrich</string><string>agents-score</string></array>
+  <key>WorkingDirectory</key><string>__PROJECT__</string>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>__PROJECT__/data/logs/launchd-agents-score.log</string>
+  <key>StandardErrorPath</key><string>__PROJECT__/data/logs/launchd-agents-score.log</string>
+</dict>
+</plist>

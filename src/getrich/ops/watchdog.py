@@ -21,6 +21,7 @@ from .. import config
 from ..obs.events import emit, iso, parse_ts, utcnow
 from ..obs.heartbeat import beat, read
 from ..store.db import connect
+from ..llm import budget
 from ..store.ledger import verify_chain
 
 SERVICE = "watchdog"
@@ -74,6 +75,7 @@ def check(now=None) -> list[Alert]:
     try:
         with connect(timeout=5) as con:
             chain_ok, _, bad_seq = verify_chain(con)
+            spent = budget.month_spend_con(con)
         if not chain_ok:
             alerts.append(
                 Alert(
@@ -81,6 +83,13 @@ def check(now=None) -> list[Alert]:
                     "stop trading; restore data/getrich.duckdb from backup and find out what changed it",
                 )
             )
+        cap = budget.monthly_cap()
+        if spent >= cap:
+            alerts.append(Alert("claude_budget_exhausted", "P1", f"Claude spend ${spent:.2f} reached the ${cap:.2f} monthly cap",
+                                "agents are paused until next month; raise GETRICH_CLAUDE_MONTHLY_CAP_USD only deliberately"))
+        elif spent >= budget.WARN_FRACTION * cap:
+            alerts.append(Alert("claude_budget_80", "P1", f"Claude spend ${spent:.2f} is {spent / cap:.0%} of the ${cap:.2f} monthly cap",
+                                "check `getrich agents-status`; agents stop at the cap"))
     except TimeoutError:
         pass  # the database is busy; the next run will check
 
