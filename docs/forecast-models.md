@@ -39,3 +39,14 @@ uv run getrich forecast-run chronos2            # daily origins, BTC and ETH
 uv run getrich forecast-eval --write            # docs/forecast-eval.md
 ```
 Kronos needs `forecast-fetch-code`, a read of its Python files, and `reviewed: true` in the lock before it will run. It is slow (about a dozen sampled paths per forecast), so it defaults to every 5th day, and `--since 2025-08-02` limits it to the window that can be judged.
+
+## Record of what was fetched and reviewed (2026-11-14)
+
+- Weights downloaded with `forecast-fetch`, each file hashed in a local lock (`config/forecast_models.lock.json`, gitignored because it holds cache paths): Kronos-small (99.0 MB) and its tokenizer (15.8 MB), Chronos-2 (477.9 MB), TimesFM 2.5 (925.2 MB).
+- Kronos source: `https://github.com/shiyu-coder/Kronos` at commit `67b630e67f6a18c9e9be918d9b4337c960db1e9a`. The only files that are ever imported are `model/__init__.py`, `model/kronos.py` and `model/module.py` (1,252 lines). All three were read in full: they import only math, einops, torch, numpy, pandas, tqdm and huggingface_hub, and make no network calls, no subprocess, `eval`, `exec`, pickle, `torch.load` or file access. Their SHA-256 hashes are recorded in the lock and checked before every run, so a changed file blocks the run until it is read again.
+  - `model/__init__.py` `f8f856ca3fedadca`
+  - `model/kronos.py` `0a5f90282e2039c2`
+  - `model/module.py` `a07edbadc0e96804`
+- The Chronos-2 and TimesFM 2.5 workers were checked against the installed libraries' signatures (`chronos-forecasting` 2.3.2 and `timesfm` 3.0.2, which does include the 2.5 class) but have not run yet.
+- Kronos-small ran on the post-release window (2025-08-02 onward) at about 4.4 seconds per forecast. First results, BTC: worse than a random walk at 1, 5 and 20 days (skill -0.28, -0.51, -0.52), no direction information, 80% bands that held 63%, 54% and 47% of the time. Full numbers: `getrich forecast-eval`.
+- A bug found on the way: the cache used to be written once per symbol, so an interrupted run lost its batches. It is now written after every batch (tested).

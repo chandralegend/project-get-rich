@@ -45,9 +45,7 @@ def _forecast_command(args) -> int:
 
     problems = fetch.verify(args.model)
     if args.model.startswith("kronos"):
-        lock = models.load_lock().get("kronos_code")
-        if not lock or not lock.get("reviewed"):
-            problems.append("the Kronos source has not been fetched and marked reviewed (forecast-fetch-code, then set kronos_code.reviewed in config/forecast_models.lock.json after reading it)")
+        problems += fetch.verify_code()
     if problems:
         print("\n".join(problems))
         return 2

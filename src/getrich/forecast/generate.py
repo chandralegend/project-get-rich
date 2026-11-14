@@ -44,21 +44,19 @@ def generate(fc: Forecaster, symbol: str, bars: pd.DataFrame, *, stride: int | N
     todo = want[~np.isin(ns[want], old.origins.astype("datetime64[ns]").astype("int64"))] if old and len(old) else want
     if max_new is not None:
         todo = todo[:max_new]
-    origins, cubes, crossed = [], [], 0
+    merged, crossed = old, 0
     for s in range(0, len(todo), batch):
         part = todo[s: s + batch]
         X, T = windows(bars, part, fc.context_len)
         cube, n_cross = validate_cube(fc.forecast(X, T), len(part))
         crossed += n_cross
-        cubes.append(cube)
-        origins.append(ns[part].astype("datetime64[ns]"))
+        new_o = ns[part].astype("datetime64[ns]")
+        merged = Cache(fc.name, symbol, np.concatenate([merged.origins, new_o]) if merged and len(merged) else new_o,
+                       np.concatenate([merged.cube, cube]) if merged and len(merged) else cube)
+        save_cache(merged)                       # after EVERY batch: an interrupted run keeps everything finished so far
         if progress:
             progress(s + len(part), len(todo))
-    if cubes:
-        new_o, new_c = np.concatenate(origins), np.concatenate(cubes)
-        merged = Cache(fc.name, symbol, np.concatenate([old.origins, new_o]) if old else new_o,
-                       np.concatenate([old.cube, new_c]) if old else new_c)
-        save_cache(merged)
-        emit("forecast.generated", service=SERVICE, model=fc.name, symbol=symbol, new=len(new_o), total=len(merged), crossing_fixed=crossed)
+    if len(todo):
+        emit("forecast.generated", service=SERVICE, model=fc.name, symbol=symbol, new=int(len(todo)), total=len(merged), crossing_fixed=crossed)
         return merged
     return old or Cache(fc.name, symbol, np.array([], dtype="datetime64[ns]"), np.zeros((0, 0, 0), dtype=np.float32))

@@ -19,23 +19,28 @@ from model import Kronos, KronosPredictor, KronosTokenizer  # noqa: E402  (third
 
 z = np.load(a.inp)
 ohlcv, ts, H, Q = z["ohlcv"], z["ts"], [int(h) for h in z["horizons"]], [float(q) for q in z["quantiles"]]
-device = "mps" if torch.backends.mps.is_available() else "cpu"
+device = "mps" if torch.backends.mps.is_available() and not os.environ.get("GETRICH_FORCE_CPU") else "cpu"
 tok = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
 mdl = Kronos.from_pretrained("NeoQuasar/Kronos-small")
 pred = KronosPredictor(mdl, tok, device=device, max_context=512)
 hmax = max(H)
-cube = np.zeros((len(ohlcv), len(H), len(Q)))
-for i in range(len(ohlcv)):
-    x = pd.DataFrame(ohlcv[i], columns=["open", "high", "low", "close", "volume"])
-    xt = pd.Series(pd.to_datetime(ts[i] * 86400, unit="s"))
-    yt = pd.Series(pd.date_range(xt.iloc[-1] + pd.Timedelta(days=1), periods=hmax, freq="D"))
-    last = float(ohlcv[i, -1, 3])
-    paths = []
+n = len(ohlcv)
+cube = np.zeros((n, len(H), len(Q)))
+CHUNK = 16                                                        # series per predict_batch call; all contexts have the same length
+for s in range(0, n, CHUNK):
+    idx = list(range(s, min(s + CHUNK, n)))
+    dfs = [pd.DataFrame(ohlcv[i], columns=["open", "high", "low", "close", "volume"]) for i in idx]      # the predictor derives `amount` from volume
+    xts = [pd.Series(pd.to_datetime(ts[i].astype("int64") * 86400, unit="s")) for i in idx]
+    yts = [pd.Series(pd.date_range(x.iloc[-1] + pd.Timedelta(days=1), periods=hmax, freq="D")) for x in xts]
+    last = np.array([ohlcv[i, -1, 3] for i in idx])
+    samples = []
     for k in range(a.samples):
         torch.manual_seed(1000 + k)
-        out = pred.predict(df=x, x_timestamp=xt, y_timestamp=yt, pred_len=hmax, T=1.0, top_p=0.9, sample_count=1)
-        paths.append(np.log(out["close"].to_numpy(dtype=float) / last))
-    paths = np.asarray(paths)                                  # (samples, hmax)
-    for j, h in enumerate(H):
-        cube[i, j] = np.quantile(paths[:, h - 1], Q)
+        outs = pred.predict_batch(dfs, xts, yts, pred_len=hmax, T=1.0, top_k=0, top_p=0.9, sample_count=1, verbose=False)
+        samples.append([np.log(o["close"].to_numpy(dtype=float) / l) for o, l in zip(outs, last)])
+    samples = np.asarray(samples)                                 # (samples, series, hmax)
+    for r, i in enumerate(idx):
+        for j, h in enumerate(H):
+            cube[i, j] = np.quantile(samples[:, r, h - 1], Q)
+    print(f"kronos: {min(s + CHUNK, n)}/{n}", file=sys.stderr, flush=True)
 np.savez(a.out, cube=cube)

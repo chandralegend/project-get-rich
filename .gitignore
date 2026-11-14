@@ -6,3 +6,7 @@ data/
 .env
 *.duckdb
 *.duckdb.wal
+
+# third-party model source checked out for review (forecast-fetch-code); never committed
+models/
+config/forecast_models.lock.json

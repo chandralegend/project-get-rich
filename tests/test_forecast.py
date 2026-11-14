@@ -200,3 +200,23 @@ def test_prob_up_and_features_are_scaled_by_volatility():
     assert (f["m_pup_h5"] > 0).all() and f["m_skew_h5"].abs().max() < 1e-6
     assert f["m_width_h20"].iloc[0] == pytest.approx(0.2 / (0.02 * np.sqrt(20)))
     assert "m_width_h1" not in f.columns
+
+
+def test_an_interrupted_run_keeps_every_batch_that_finished():
+    class Dies(RandomWalk):
+        name, calls = "fake_dies", 0
+
+        def forecast(self, ohlcv, ts):
+            Dies.calls += 1
+            if Dies.calls == 3:
+                raise RuntimeError("the machine went to sleep")
+            return super().forecast(ohlcv, ts)
+
+    bars = make_bars(300)
+    with pytest.raises(RuntimeError, match="went to sleep"):
+        generate(Dies(), "A", bars, stride=1, batch=10)
+    assert len(load_cache("fake_dies", "A")) == 20                            # batches 1 and 2 survived
+    Dies.calls = -100
+    generate(Dies(), "A", bars, stride=1, batch=10)                           # the rerun resumes and adds only what was missing
+    full = load_cache("fake_dies", "A")
+    assert len(full) == len(np.unique(full.origins)) > 100

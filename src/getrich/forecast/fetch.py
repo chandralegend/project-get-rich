@@ -80,6 +80,24 @@ def verify(name: str) -> list[str]:
     return problems
 
 
+def verify_code() -> list[str]:
+    """The Kronos files that were reviewed must be byte-identical to what will run. Returns problems (empty means fine)."""
+    info = load_lock().get("kronos_code")
+    if not info or not info.get("reviewed"):
+        return ["the Kronos source has not been fetched and reviewed (forecast-fetch-code, read model/*.py, then record the review in config/forecast_models.lock.json)"]
+    base = config.root() / "models" / "kronos-src"
+    problems = []
+    for name, digest in (info.get("reviewed_files") or {}).items():
+        p = base / name
+        if not p.exists():
+            problems.append(f"reviewed file {name} is missing")
+        elif file_entry(p)["sha256"] != digest:
+            problems.append(f"{name} changed since it was reviewed: read it again before running")
+    if not info.get("reviewed_files"):
+        problems.append("the review recorded no file hashes")
+    return problems
+
+
 def fetch_code(dest: Path | None = None) -> dict:
     dest = dest or config.root() / "models" / "kronos-src"
     if dest.exists():
