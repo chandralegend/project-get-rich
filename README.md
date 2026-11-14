@@ -28,6 +28,8 @@ ops/launchd/install.sh
 ops/launchd/install.sh install
 ```
 
+Keep this folder outside `~/Documents`, `~/Desktop` and `~/Downloads`. macOS blocks background jobs from reading those, and the jobs then fail while manual runs still work. After installing, check that the heartbeat timestamps in `getrich status` keep updating.
+
 Secrets go in a gitignored `.env` file (see `getrich doctor` for the names), never in the repo.
 
 ## What exists so far

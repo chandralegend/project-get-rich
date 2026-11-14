@@ -84,7 +84,7 @@ Items marked **[own calc]** are my arithmetic from stated assumptions. Items mar
 
 | Need | Source | Notes |
 |---|---|---|
-| Crypto bars, funding, OI | Binance REST API; Binance Vision bulk files for **research only** | **Licence trap (verified):** Vision terms (updated 2026-08-26) allow personal backtesting but forbid "live proprietary trading execution" (§4.2) and cover derived models (§2.4). Treat Vision as research data; build production features from REST data. Binance API terms not read [verify]. |
+| Crypto bars, funding, OI | Binance REST API; Binance Vision bulk files for **research only** | **Licence trap (verified):** Vision terms (updated 2026-08-26) allow personal backtesting but forbid "live proprietary trading execution" (§4.2) and cover derived models (§2.4). Treat Vision as research data; build production features from REST data. The API terms were read on 2026-11-14 and do not address storing public market data either way (`docs/binance-terms-review.md`). |
 | FX and metals history | Dukascopy (tick/bars), HistData | No licence text found for Dukascopy data [track 02, 10]. Validate against the execution broker's own prices before any live use. |
 | Macro | FRED, ECB, Fed, BoE, BoJ, CFTC COT | Free. FRED's keyless CSV failed in one test; use an API key (free). |
 | News | RSS, GDELT, central-bank feeds, exchange announcements | Check feed terms on storage and LLM use [not read]. Reddit and X are not usable. |
@@ -155,6 +155,7 @@ Separate process, deterministic, no network, limits in a hash-pinned read-only f
 | Net factor caps | Crypto beta, USD/real-rate exposure | Caps because BTC-gold correlation was 0.42 in 2026 vs 0.06–0.14 before [track 11, unverified] |
 | Cost gate | Skip trades whose expected edge < k × round-trip cost | Required |
 | Min-size rule | Skip if the broker's minimum size overshoots the risk budget | Required; see below |
+| Conduct guard | Self-trade prevention, minimum order lifetime, cap on cancel-to-fill ratio | Required by Binance's API terms (no wash trading or spoofing); see `docs/binance-terms-review.md` |
 | Kill switch | Flatten + cancel all, one command, works offline | Must be tested in Phase 4 |
 
 **Small-account reality [own calc, assumptions stated].** At $500 with 0.5% risk per trade, the budget is $2.50. Assuming a standard 0.01 lot of XAUUSD is 1 oz (check your broker) and gold is around $3,900–4,000, a $25 stop costs $25, or 5% of the account. So the min-size rule will skip most gold trades unless the broker offers cent or micro contracts. EURUSD at 0.01 lot is about $0.10 per pip, so a 20-pip stop is about $2, which fits. Crypto spot at this size is fine as long as the exchange minimum notional is small [verify]. Round-trip fees on Binance spot are 0.2% before any discount [verify]; a daily strategy can absorb that, an hourly one cannot.
@@ -263,7 +264,7 @@ Time estimates are my rough guesses at 10+ hours/week; gate thresholds are sugge
 ## 7. Open risks and unknowns
 
 1. **Legal/funding (Sri Lanka).** CBSL's 2019 notice says residents are "not permitted" to trade forex or remit funds abroad for it; crypto is grey, with a VASP regime approved by Cabinet but not yet law; a PFCA remittance cap expires about 20 Dec 2026 [track 08, extracted from CBSL and gazette text by the agent, not re-read by me]. You have chosen to handle this; confirm it with a lawyer and an accountant before real money moves.
-2. **Binance:** futures eligibility, production API availability for Sri Lankan accounts and API terms are unconfirmed [track 08].
+2. **Binance:** futures eligibility and production API availability for Sri Lankan accounts are unconfirmed [track 08]. The API terms were read on 2026-11-14 (`docs/binance-terms-review.md`): automated trading with keys is allowed, with conduct rules and key-handling duties. Whether storing public market data is covered is not addressed.
 3. **cTrader:** which broker, whether it enables the Open API for you, and real XAUUSD/EURUSD spreads and Sri Lanka funding routes are unverified for every broker [track 08]; the official Python client is stale.
 4. **Data licences:** Binance Vision (see 4.1); Dukascopy and news-feed terms unread.
 5. **Crypto structure risk:** the 10 Oct 2025 crash liquidated over $19B and some collateral tokens depegged on Binance only [track 11, causation disputed]. Plan for exchange-specific tail risk and stablecoin risk.

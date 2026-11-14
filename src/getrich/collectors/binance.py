@@ -2,7 +2,8 @@
 
 Only CLOSED bars are stored. Production data comes from the REST API on purpose: the bulk
 data.binance.vision files are licensed for personal non-production research only (see ARCHITECTURE.md).
-The Binance API terms themselves have not been read yet.
+The API Key Terms were read on 2026-11-14 (docs/binance-terms-review.md); they govern API keys and do not
+explicitly address storing public market data, which this key-less collector fetches.
 """
 
 from __future__ import annotations
