@@ -125,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     ordp = sub.add_parser("orders", help="recent orders and their status")
     ordp.add_argument("--limit", type=int, default=15)
     ordp.add_argument("--venue", choices=["paper", "testnet"], default=None)
+    rp = sub.add_parser("replay", help="replay stored BTC/ETH history through the real risk gate and paper broker; checks invariants, compares with the baselines")
+    rp.add_argument("--write", action="store_true", help="write docs/phase4-replay.md")
     posp = sub.add_parser("positions", help="account: equity, open positions, realised result, halts")
     posp.add_argument("--venue", choices=["paper", "testnet"], default="paper", help="paper = local simulator (default); testnet = Binance Spot Testnet, virtual money")
     tk = sub.add_parser("paper-tick", help="check for triggered stops and take profits (stored bars for paper, the exchange for testnet); snapshot equity")
@@ -175,6 +177,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
     if args.cmd in ("propose", "approve", "reject", "orders", "positions", "paper-tick", "kill", "unkill", "unhalt", "limits-pin"):
         return _trading_command(args)
+    if args.cmd == "replay":
+        from .trading import replay_report
+
+        out = replay_report.run_all()
+        text = replay_report.to_markdown(out)
+        print(text)
+        if args.write:
+            (config.root() / "docs" / "phase4-replay.md").write_text(text)
+            print("wrote docs/phase4-replay.md")
+        return 0 if all(not d["result"].violations for d in out["runs"].values()) else 1
     if args.cmd == "collect-webnews":
         from .collectors import webnews
 

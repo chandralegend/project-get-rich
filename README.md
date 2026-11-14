@@ -13,7 +13,7 @@ A local-first research and trading system for crypto, gold and FX, built for per
 
 ```bash
 uv sync
-uv run pytest                  # 304 tests, offline, none call the real API
+uv run pytest                  # 311 tests, offline, none call the real API
 uv run getrich collect-binance # closed daily bars for BTCUSDT and ETHUSDT (public API, no key)
 uv run getrich collect-news    # primary-source RSS (Fed, ECB, BoE, BoC, BoJ; SEC too if GETRICH_CONTACT is set in .env). Crypto outlets are excluded: docs/news-feed-terms.md
 uv run getrich collect-webnews # open web headlines: GDELT raw files and Google News RSS, filtered to crypto, gold, FX and rates
@@ -35,6 +35,7 @@ uv run getrich agents-status   # Claude spend against the cap, ledger and scorec
 uv run getrich propose buy BTCUSDT --stop 64900   # PAPER order: runs the risk gate, prints its verdict, sends nothing
 uv run getrich approve <order_id>                # you approve (typed yes); there is no auto-submit
 uv run getrich positions       # paper equity, positions, realised result, halts  (add --venue testnet for the Binance testnet)
+uv run getrich replay          # replay stored history through the real gate and paper broker; invariants plus comparison with the baselines (local only)
 uv run getrich kill            # kill switch: flatten everything, block new positions (unkill / unhalt to resume)
 ```
 

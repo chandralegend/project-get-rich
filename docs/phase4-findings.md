@@ -22,9 +22,19 @@ Date: 2026-11-14. Status: the core is built and tested and runs on paper. The Bi
 - **Testnet prices differ from mainnet.** For the testnet venue the gate uses the testnet's own last price and its own exchange filters, not stored mainnet bars.
 - **At $500 the sizes are tiny but valid.** A 5% stop on BTC sizes to about 0.0012 BTC (about $80) risking $2.50. Gold-style min-size problems do not arise for crypto spot at this size.
 
+## Replay on real history (local, no external calls)
+
+`uv run getrich replay [--write]` replays 2,509 days of stored BTC and ETH daily bars through the real gate, cost model and approved limits, with the Phase 3 pre-registered primary rule fixed in advance (nothing tuned on this). Full report: [phase4-replay.md](phase4-replay.md).
+
+- **The system behaves.** Zero invariant violations over 347 trades (334 at 2x costs): risk per trade never above 0.5% of equity, exposure at entry never above 20%, whole exchange steps and minimum sizes respected, cash never negative, nothing opened under a halt. The gate refused only 21 signal days (15 for stops that were too tight, 5 for minimum size, 1 for exposure room). Seven replay tests include a true gap through a stop (it fills at the gapped open and loses more than its risk budget, as it should).
+- **The rule is not good.** Sharpe 0.39 against 0.99 for the research baseline (vol-scaled trend) and 0.87 for buy and hold, 41% winners, median trade -1.03 R, average +0.10 R. Fees took about a third of gross profit. At the approved minimal limits the account earns about +2.3% a year (+15.9% in total over six and a half years) with a 15% drawdown. The stop-and-target structure appears to hurt a trend rule: 188 of 347 trades ended at the stop.
+- **It has been losing for 32 months.** Equity peaked at $682 on 2024-03-11 and ended at $580 on 2026-11-13, which is 14.96% below the peak: 0.04 points short of the 15% drawdown halt. At 2x costs the halt tripped on 2026-10-24. Run live today, the system would be at the edge of halting itself.
+- **Design note, not a bug:** the exposure cap binds when a position is opened and nothing trims a winner afterwards, so marked exposure peaked at 21.4%. If you want the 20% to be a hard ceiling, the gate needs a trim or rebalance rule. Say so and I will add one.
+- **What it can and cannot say.** Same history the research already looked at, so it cannot confirm an edge, and a pass means only that the plumbing is sound. The trained Phase 2 models are not part of this replay: they were fitted inside cross-validation and no final model was ever saved, so there is nothing to load. They also did not beat this rule, so they are not what I would wire in next.
+
 ## Verified, and not
 
-Verified: 62 new tests, none touching a network (gate rules including "never loosens", limits tamper handling, the lifecycle, stops, gaps, kill switch, latch, approval re-check, signing checked against an independent HMAC computation, protective-stop failure, lookup after a server error, clock resync, a fake exchange end to end). Also run for real on your data: a paper proposal was sized and reviewed, then rejected.
+Verified: 69 new tests, none touching a network (gate rules including "never loosens", limits tamper handling, the lifecycle, stops, gaps, kill switch, latch, approval re-check, signing checked against an independent HMAC computation, protective-stop failure, lookup after a server error, clock resync, a fake exchange end to end). Also run for real on your data: a paper proposal was sized and reviewed, then rejected.
 
 Not verified against the real testnet: everything the fake exchange assumes about response shapes (I used the fields in Binance's docs, read by a helper; the `RESULT` response and `/order/test` pages were not retrieved), and whether the exchange accepts a `STOP_LOSS` sell at the prices the gate allows. The first real run will tell.
 
