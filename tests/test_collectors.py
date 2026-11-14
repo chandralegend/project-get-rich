@@ -78,3 +78,26 @@ def test_news_dedupes_and_stores_two_clocks():
     assert rows[0][2] is not None and rows[0][3] is not None
     assert rows[1][2] is None  # no pubDate: published_at stays empty, ingested_at is still set
     assert rows[1][3] is not None
+
+
+def test_the_sec_feed_is_only_enabled_with_a_declared_contact_and_sends_it(monkeypatch):
+    monkeypatch.delenv("GETRICH_CONTACT", raising=False)
+    assert "sec.press" not in news.default_feeds() and {"fed.speeches", "boc.press", "boj.news"} <= set(news.default_feeds())
+    monkeypatch.setenv("GETRICH_CONTACT", "research@example.org")
+    assert "sec.press" in news.default_feeds()
+    seen = {}
+
+    def handler(request):
+        seen[str(request.url)] = request.headers["user-agent"]
+        return httpx.Response(200, content=RSS)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    news.collect({"sec.press": news.SEC_FEED["sec.press"], "fed.press": "https://example.org/rss"}, client=client)
+    assert "research@example.org" in seen[news.SEC_FEED["sec.press"]]
+    assert "research@example.org" not in seen["https://example.org/rss"]          # contact details go only to the SEC
+
+
+def test_placeholder_dates_are_not_trusted():
+    feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>t</title><item><title>Old testimony</title>
+<link>https://example.org/t</link><pubDate>Sat, 30 Dec 1899 00:00:00 GMT</pubDate></item></channel></rss>"""
+    assert news.parse_feed("x", feed)[0]["published_at"] is None

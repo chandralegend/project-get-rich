@@ -15,7 +15,7 @@ A local-first research and trading system for crypto, gold and FX, built for per
 uv sync
 uv run pytest                  # 177 tests, offline, none call the real API
 uv run getrich collect-binance # closed daily bars for BTCUSDT and ETHUSDT (public API, no key)
-uv run getrich collect-news    # central-bank RSS feeds (Fed, ECB, BoE)
+uv run getrich collect-news    # primary-source RSS (Fed, ECB, BoE, BoC, BoJ; SEC too if GETRICH_CONTACT is set in .env). Crypto outlets are excluded: docs/news-feed-terms.md
 uv run getrich watchdog        # run every health check once
 uv run getrich status          # the status screen
 uv run getrich doctor          # check this Mac against the hardening list
@@ -53,7 +53,7 @@ Secrets go in a gitignored `.env` file (see `getrich doctor` for the names), nev
 | Binance klines and central-bank news collectors | `src/getrich/collectors/` |
 | Watchdog (alerts P0/P1/P2, external dead-man's-switch ping) and `doctor` | `src/getrich/ops/` |
 | launchd jobs | `ops/launchd/` |
-| Hash-chained insight ledger (writes arrive in Phase 3) | `src/getrich/store/ledger.py` |
+| Hash-chained insight ledger | `src/getrich/store/ledger.py` |
 | Phase 0 exit gate and manual acknowledgements | `src/getrich/ops/gate.py` |
 | Compute benchmark | `scripts/bench_compute.py`, `docs/benchmark-m4.md` |
 | Evaluation harness: costs, purged CV and CPCV, Deflated Sharpe, triple-barrier labels, backtest, trend and HAR baselines, limit derivation, PI-Net v1 models | `src/getrich/eval/`, [docs/phase1-findings.md](docs/phase1-findings.md), [docs/phase2-findings.md](docs/phase2-findings.md) |

@@ -41,10 +41,10 @@ Safeguards, each covered by tests with a fake SDK (nothing here has spent any mo
 Costs, by my arithmetic from the published prices: Haiku extraction about $0.0003 per item, a Sonnet briefing about $0.02 to $0.03. Even a busy month is a few dollars, well inside the $30 cap.
 
 **Not done, and why:**
-- No real API call has been made. Add `ANTHROPIC_API_KEY=...` to `.env` (a key made just for this project, with a spend limit set in the Claude Console), run `uv run getrich agents-extract --dry-run`, then without `--dry-run`. Only then install the jobs with `ops/launchd/install.sh install-agents`.
+- (Done 2026-11-14: key added with a Console spend limit, first live runs made, and the three jobs installed with `install-agents`. Extraction runs hourly, the briefing at 06:00 and scoring at 07:00 local time. The Investigator is not scheduled: it runs only when you start it.)
 - Embeddings and a sentiment model are not in the pre-filter yet, because the model downloads are large on this connection. They are needed for the Phase 2b text channel, not for this layer.
 - The trade journal (role 2) has nothing to review until trades exist.
-- Only central-bank feeds are collected. Crypto news feeds are excluded until their terms on storage and LLM use are read, so crypto-specific events (listings, hacks, stablecoin stress) are mostly invisible to the agents for now.
+- Crypto news outlets are not collected. Their terms were read on 2026-11-14 and four of five prohibit automated access or copying (details in [news-feed-terms.md](news-feed-terms.md)). Collected now: Fed press and speeches, ECB, BoE, Bank of Canada, Bank of Japan, plus the SEC if `GETRICH_CONTACT` is set in `.env`. Crypto-specific events (listings, hacks, stablecoin stress) are still mostly invisible to the extractor.
 - A real-API run could still fail on request details I could not test, for example a parameter combination the live API rejects. The fake SDK tests prove my code, not the API's behaviour.
 
 ## 3. Your Agent SDK and subscription ideas
@@ -98,10 +98,13 @@ I recommended the Messages API with server-side tools as the simpler option; you
 - *Now verified against the real SDK:* the model loads and calls our market tools under the allowlist, `WebSearch` works (its input also carries a `mode` key), and the capture hook receives the `WebFetch` result as text under `url`.
 - *Found and fixed:* a failed fetch (HTTP 403) arrives as ordinary text and was being stored as a page. Failed fetches are now skipped and logged as `investigator.fetch_failed`. One such row from the first live run is in `news_items` (source `web:www.fastcompany.com`); it is harmless but listed under that run's pages.
 
+- *Third run, primary sources ($0.079, 6 pages, 0 searches, 0 denied):* asked to verify our pipeline's Bank of England item against the central banks' own sites, it went straight to federalreserve.gov, bankofengland.co.uk and ecb.europa.eu, confirmed the Bank Rate rise to 4% on 5 November, and found that the Fed held on 28 October with two dissents for a hike, which contradicted the earlier run's outlet that said the Fed had already hiked. It marked the ECB's October hold as inferred because that decision page did not say it. It returned no views. Its rate findings carry confidence 0.75 to 0.90, above the 0.7 the prompt calls rare; that is defensible for a fact read off a primary page, but it is a calibration to watch.
+- *Citation support:* I considered adding a second model to judge whether each citation really supports its claim, and did not. It would cost money, and it would be a second unvalidated model grading the first. The scorecard measures outcomes, which is the real test. If flags that cite weak evidence turn out to score worse than well-cited ones, that is the point to build it.
+
 **Caveats that matter:**
 - `WebFetch` returns a model-written extract of the page, not the raw text. What is stored as evidence is that extract, one layer removed from the source, and it can be stale (one fetched article was dated June 2025). Treat investigator evidence as secondary.
 - The agent's sources were secondary outlets that disagreed with each other. It said so, which is the good behaviour, but its findings are unverified until scored.
-- A run costs roughly $0.05 to $0.10 so far, well under the $0.75 limit. Total live spend today: about $0.20.
+- A run costs roughly $0.05 to $0.10 so far, well under the $0.75 limit. Total live spend today: about $0.28.
 
 **Subscription:** this job needs an API key (see section 3). Using it inside your own interactive Claude Code sessions is separate and unaffected.
 
