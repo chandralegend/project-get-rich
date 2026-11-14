@@ -9,6 +9,8 @@ dependencies = [
     "feedparser>=6.0",
     "rich>=13.7",
     "pytz",  # DuckDB needs it to return timezone-aware timestamps to Python
+    "numpy>=2.0",
+    "pandas>=2.2",
 ]
 
 [dependency-groups]

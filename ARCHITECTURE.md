@@ -20,7 +20,7 @@ Items marked **[own calc]** are my arithmetic from stated assumptions. Items mar
 | Interface | Terminal only for now | You |
 | LLM | Claude only in the cloud, about $30/month; everything else local | You |
 | Agent roles | Daily briefing + event-risk flags first, then trade review, then shadow-mode signal generation | You |
-| Max drawdown halt | Derived by research (Phase 1), you approve. Interim placeholder: 10% account, 3% daily | You + me |
+| Max drawdown halt | Derived in Phase 1 and approved by you: 15% account, 2.5% daily, 20% exposure cap | You + me |
 | FX/gold legal position | You will handle it. I flagged CBSL's 2019 notice and the funding limits (track 08); all live FX paths stay behind your manual approval | You |
 | Builder | Strong Python/ML, 10+ hours/week | You |
 
@@ -150,8 +150,9 @@ Separate process, deterministic, no network, limits in a hash-pinned read-only f
 | Control | Starting value | Status |
 |---|---|---|
 | Risk per trade | 0.25–0.5% of equity | Starting point |
-| Account halt | 10% drawdown (interim) | You asked research to set this; revisit after Phase 1 stress tests |
-| Daily loss halt | 3% (interim) | Same |
+| Account halt | 15% drawdown | Derived in Phase 1, approved by you 2026-11-14 (minimal profile, `config/limits.toml`) |
+| Daily loss halt | 2.5% | Same |
+| Exposure cap | 20% of equity in crypto at once | Same. Chosen because a repeat of the worst 24-hour fall (x1.5) still fits inside the 15% halt |
 | Net factor caps | Crypto beta, USD/real-rate exposure | Caps because BTC-gold correlation was 0.42 in 2026 vs 0.06–0.14 before [track 11, unverified] |
 | Cost gate | Skip trades whose expected edge < k × round-trip cost | Required |
 | Min-size rule | Skip if the broker's minimum size overshoots the risk budget | Required; see below |
@@ -250,7 +251,7 @@ Time estimates are my rough guesses at 10+ hours/week; gate thresholds are sugge
 | Phase | About | Work | Gate |
 |---|---|---|---|
 | **0 Foundations** | 1–2 weeks | Repo, store, collectors, **news/insight recorder running unattended**, **event log with `decision_id`, hash-chained insight ledger, status screen, external heartbeat, `getrich gate` exit checker**, Mac mini hardening, MPS-vs-MLX one-hour test | Recorder runs a week unattended; data reproducible; killing a process raises an alert |
-| **1 Evaluation harness** | 2–3 weeks | Cost model, purged CV/CPCV, Deflated Sharpe, trend and HAR baselines on BTC/ETH; derive drawdown and loss limits from backtests and stress scenarios | Harness rejects shuffled labels; you approve the drawdown limits |
+| **1 Evaluation harness** | 2–3 weeks | Cost model, purged CV/CPCV, Deflated Sharpe, trend and HAR baselines on BTC/ETH; derive drawdown and loss limits from backtests and stress scenarios | Harness rejects shuffled labels; you approve the drawdown limits **Status 2026-11-14: built and validated; limits approved, minimal profile (docs/phase1-findings.md).** |
 | **2 PI-Net v1: market + forecast** | 3–4 weeks | Triple-barrier labels, outcome labeler, LightGBM baseline, then small fusion net with market and forecast channels, dense auxiliary targets, permutation test | Beats baselines net of 2× costs under CPCV; DSR positive |
 | **2b Raw-text channel** | 2–3 weeks | Backfill GDELT/RSS history, frozen embeddings, attention pooling, modality ablation | Text channel shows incremental CPCV lift over 2, or it stays masked |
 | **3 Agents in shadow, then Claude channel** | Ongoing, starts in Phase 0 | Briefings and flags, then journal, then shadow signals, all scored in the ledger. Switch on the Claude-insight channel once the resolved-event threshold is met | Insight channel adds out-of-sample lift on forward data (needs months of recording) |
