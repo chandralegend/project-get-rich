@@ -57,6 +57,54 @@ def test_alert_lifecycle_raise_then_clear_and_ping_only_when_healthy(monkeypatch
     assert '"alert.raised"' in log and '"alert.cleared"' in log
 
 
+def test_notification_attempts_are_logged(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("GETRICH_NOTIFY", "1")
+    monkeypatch.setattr(watchdog.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stderr=""))
+    watchdog._notify(watchdog.Alert("k", "P1", "something stale", "do a thing"))
+    log = "".join(p.read_text() for p in config.logs_dir().glob("events-*.jsonl"))
+    assert '"watchdog.notified"' in log and '"returncode":0' in log
+
+
+def test_a_failed_notification_is_logged_and_does_not_crash(monkeypatch):
+    monkeypatch.setenv("GETRICH_NOTIFY", "1")
+
+    def boom(*a, **k):
+        raise OSError("no osascript")
+
+    monkeypatch.setattr(watchdog.subprocess, "run", boom)
+    watchdog._notify(watchdog.Alert("k", "P0", "m", "a"))
+    log = "".join(p.read_text() for p in config.logs_dir().glob("events-*.jsonl"))
+    assert '"watchdog.notified"' in log and "no osascript" in log
+
+
+def test_successful_external_ping_is_logged(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("GETRICH_HEARTBEAT_URL", "https://example.invalid/ping")
+    monkeypatch.setattr(watchdog.httpx, "get", lambda *a, **k: SimpleNamespace(status_code=200))
+    watchdog._ping()
+    log = "".join(p.read_text() for p in config.logs_dir().glob("events-*.jsonl"))
+    assert '"watchdog.pinged"' in log
+
+
+def test_broken_ledger_is_a_p0():
+    from datetime import timedelta
+
+    from getrich.obs.events import utcnow
+    from getrich.store import ledger
+    from getrich.store.db import connect
+
+    with connect() as con:
+        con.execute(
+            "INSERT INTO news_items VALUES ('n_a','s','u','t','',NULL,?,'h')", [utcnow() - timedelta(minutes=5)]
+        )
+        ledger.record_insight(con, asset="ETH", payload={"d": 1}, evidence=["n_a"], model="haiku")
+        con.execute("UPDATE insights SET asset = 'TAMPERED' WHERE seq = 1")
+    assert _alerts(watchdog.check())["ledger_broken"].severity == "P0"
+
+
 def test_watchdog_writes_its_own_heartbeat():
     watchdog.run(notify=False, ping=False)
     from getrich.obs.heartbeat import read

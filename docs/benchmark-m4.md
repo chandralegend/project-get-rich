@@ -21,11 +21,11 @@ Run on 2026-11-14 with [scripts/bench_compute.py](../scripts/bench_compute.py). 
 | PyTorch CPU | Transformer | 6.5 | 1,654 | 794 MiB |
 | PyTorch MPS | Transformer | 11.3 | 2,890 | 476 MiB |
 | **MLX** | Transformer | **13.2** | **3,370** | 46 MiB* |
-| LightGBM | 500k rows × 60 features | skipped | | |
+| LightGBM 4.7.0 | 500k rows × 60 features, 200 trees | 3.5 s per fit | | 448 MiB |
 
 \* MLX allocates on the unified-memory GPU, and peak resident size as reported by the OS probably understates it. Do not read this column as an MLX memory advantage.
 
-LightGBM did not run: its library needs `libomp`, which is not installed. Installing it is a Homebrew change on your Mac, so I left it for you. See "Open items".
+LightGBM first failed because its library needs `libomp`. After `brew install libomp` it was rerun on its own: a 200-tree fit on 500k × 60 random rows took 3.5 seconds, so a daily-bar model with a few thousand rows trains in well under a second.
 
 ## What it means
 
@@ -43,5 +43,5 @@ LightGBM did not run: its library needs `libomp`, which is not installed. Instal
 
 ## Open items
 
-- **LightGBM timing:** run `brew install libomp`, then rerun the script. `getrich doctor` now checks for it.
 - Repeat after any macOS or PyTorch major update, since MPS performance has changed between releases.
+- `getrich doctor` checks that `libomp` is present, because LightGBM will not load without it.

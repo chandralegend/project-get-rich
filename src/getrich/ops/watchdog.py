@@ -21,6 +21,7 @@ from .. import config
 from ..obs.events import emit, iso, parse_ts, utcnow
 from ..obs.heartbeat import beat, read
 from ..store.db import connect
+from ..store.ledger import verify_chain
 
 SERVICE = "watchdog"
 # Max seconds since the last SUCCESSFUL run before a service is considered stale (starting points).
@@ -70,6 +71,19 @@ def check(now=None) -> list[Alert]:
     elif free_gib < DISK_P1_GIB:
         alerts.append(Alert("disk_low", "P1", f"disk free {free_gib:.1f} GiB", "free space or move data/ to an external drive"))
 
+    try:
+        with connect(timeout=5) as con:
+            chain_ok, _, bad_seq = verify_chain(con)
+        if not chain_ok:
+            alerts.append(
+                Alert(
+                    "ledger_broken", "P0", f"insight ledger hash chain is broken at seq {bad_seq}",
+                    "stop trading; restore data/getrich.duckdb from backup and find out what changed it",
+                )
+            )
+    except TimeoutError:
+        pass  # the database is busy; the next run will check
+
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if now >= day_start + timedelta(minutes=10):
         expected_latest = day_start - timedelta(days=1)
@@ -109,14 +123,21 @@ def _notify(alert: Alert) -> None:
         return
     text = f"{alert.message}. {alert.action}".replace('"', "'")[:200]
     try:
-        subprocess.run(
+        proc = subprocess.run(
             ["osascript", "-e", f'display notification "{text}" with title "getrich {alert.severity}"'],
             timeout=5,
             check=False,
             capture_output=True,
+            text=True,
         )
-    except Exception:
-        pass  # a failed notification must never crash the watchdog
+        # osascript exits 0 even when macOS later hides the banner, so this proves the call was made,
+        # not that you saw it. `getrich ack notification-seen` records that you did.
+        emit(
+            "watchdog.notified", service=SERVICE, level="info" if proc.returncode == 0 else "warn",
+            key=alert.key, severity=alert.severity, returncode=proc.returncode, stderr=(proc.stderr or "")[:200],
+        )
+    except Exception as exc:  # a failed notification must never crash the watchdog
+        emit("watchdog.notified", service=SERVICE, level="warn", key=alert.key, severity=alert.severity, error=repr(exc))
 
 
 def _ping() -> None:
@@ -124,7 +145,11 @@ def _ping() -> None:
     if not url:
         return
     try:
-        httpx.get(url, timeout=10)
+        resp = httpx.get(url, timeout=10, follow_redirects=True)
+        if resp.status_code < 400:
+            emit("watchdog.pinged", service=SERVICE, status=resp.status_code)
+        else:
+            emit("watchdog.ping_failed", service=SERVICE, level="warn", status=resp.status_code)
     except Exception as exc:
         emit("watchdog.ping_failed", service=SERVICE, level="warn", error=repr(exc))
 

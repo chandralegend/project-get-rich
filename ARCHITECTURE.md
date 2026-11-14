@@ -249,7 +249,7 @@ Time estimates are my rough guesses at 10+ hours/week; gate thresholds are sugge
 
 | Phase | About | Work | Gate |
 |---|---|---|---|
-| **0 Foundations** | 1–2 weeks | Repo, store, collectors, **news/insight recorder running unattended**, **event log with `decision_id`, status screen, external heartbeat**, Mac mini hardening, MPS-vs-MLX one-hour test | Recorder runs a week unattended; data reproducible; killing a process raises an alert |
+| **0 Foundations** | 1–2 weeks | Repo, store, collectors, **news/insight recorder running unattended**, **event log with `decision_id`, hash-chained insight ledger, status screen, external heartbeat, `getrich gate` exit checker**, Mac mini hardening, MPS-vs-MLX one-hour test | Recorder runs a week unattended; data reproducible; killing a process raises an alert |
 | **1 Evaluation harness** | 2–3 weeks | Cost model, purged CV/CPCV, Deflated Sharpe, trend and HAR baselines on BTC/ETH; derive drawdown and loss limits from backtests and stress scenarios | Harness rejects shuffled labels; you approve the drawdown limits |
 | **2 PI-Net v1: market + forecast** | 3–4 weeks | Triple-barrier labels, outcome labeler, LightGBM baseline, then small fusion net with market and forecast channels, dense auxiliary targets, permutation test | Beats baselines net of 2× costs under CPCV; DSR positive |
 | **2b Raw-text channel** | 2–3 weeks | Backfill GDELT/RSS history, frozen embeddings, attention pooling, modality ablation | Text channel shows incremental CPCV lift over 2, or it stays masked |

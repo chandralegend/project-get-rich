@@ -10,13 +10,13 @@ from rich.table import Table
 
 from .. import config
 from ..store.db import connect
+from ..store.ledger import count_insights, verify_chain
 from ..ops.watchdog import EXPECTED_MAX_AGE
 from .events import parse_ts, utcnow
 from .heartbeat import read
 from .ingest import ingest_events
 
 NOT_BUILT = {
-    "AGENTS": "not built yet (Phase 3)",
     "MODEL": "not built yet (Phase 2)",
     "RISK": "not built yet (Phase 4)",
     "ORDERS": "not built yet (Phase 4)",
@@ -59,6 +59,8 @@ def build_lines() -> list[tuple[str, str]]:
             "SELECT json_extract_string(data, '$.severity'), count(*) FROM events "
             "WHERE event = 'alert.raised' AND ts > now() - INTERVAL 1 DAY GROUP BY 1"
         ).fetchall()
+        ledger_n = count_insights(con)
+        chain_ok, _, bad_seq = verify_chain(con)
 
     if bars:
         parts = [f"{s} {tf}: {n} bars, latest {latest:%Y-%m-%d}" for s, tf, n, latest in bars]
@@ -70,6 +72,8 @@ def build_lines() -> list[tuple[str, str]]:
     else:
         lines.append(("NEWS", f"0 new in 24h · {news_total} total"))
 
+    chain_txt = "[green]chain intact[/]" if chain_ok else f"[red]CHAIN BROKEN at seq {bad_seq}[/]"
+    lines.append(("AGENTS", f"insight ledger {ledger_n} insights · {chain_txt} · [dim]agents arrive in Phase 3[/]"))
     for key, text in NOT_BUILT.items():
         lines.append((key, f"[dim]{text}[/]"))
 

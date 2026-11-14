@@ -60,10 +60,14 @@
     "wall_s": 4.5
   },
   {
-    "skipped": "OSError: dlopen(/Users/chandralegend/.cache/uv/archive-v0/7ZGEVFnxQX3zO7Kh/lib/python3.13/site-packages/lightgbm/lib/lib_lightgbm.dylib, 0x0006): Library not loaded: @rpath/libomp.dylib\n  Referenced from: <59C",
-    "peak_rss_mib": 44.0,
+    "rows": 500000,
+    "features": 60,
+    "trees": 200,
+    "fit_seconds": 3.4605087079999066,
+    "lightgbm": "4.7.0",
+    "peak_rss_mib": 448.0,
     "backend": "lightgbm",
     "model": "gbm",
-    "wall_s": 0.3
+    "note": "rerun after installing libomp; first run was skipped"
   }
 ]
