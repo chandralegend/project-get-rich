@@ -72,3 +72,30 @@ def test_channel_indices_cover_every_column_once():
     ds = features.from_frames([features.build_symbol_frame("BTCUSDT", *_synthetic(), CostModel())])
     idx = sorted(i for name in ds.channels for i in ds.channel_idx(name))
     assert idx == list(range(len(features.ALL)))
+
+
+def test_foundation_features_become_an_extra_channel_and_restrict_rows_to_where_they_exist():
+    from getrich.forecast.base import Cache
+    from getrich.forecast.fakes import RandomWalk
+    from getrich.forecast.features import foundation_features
+    from getrich.forecast.generate import generate
+    from getrich.eval import labels
+
+    daily, hourly = _synthetic(900)
+    base = features.build_symbol_frame("BTCUSDT", daily, hourly, CostModel())
+    cache = generate(RandomWalk(), "BTCUSDT", daily, stride=1, since=daily.index[600])
+    fnd = foundation_features(cache, labels.daily_vol(daily["close"]), "fake_rw")
+    with_f = features.build_symbol_frame("BTCUSDT", daily, hourly, CostModel(), foundation=fnd)
+    assert 0 < len(with_f) < len(base) and with_f.index.min() >= daily.index[600]
+    assert not with_f[features.ALL + list(fnd.columns)].isna().any().any()
+    ds = features.from_frames([with_f], extra=list(fnd.columns))
+    assert ds.channels["foundation"] == list(fnd.columns) and ds.X.shape[1] == len(features.ALL) + len(fnd.columns)
+    assert ds.channel_idx("foundation") == list(range(len(features.ALL), ds.X.shape[1]))
+    plain = features.from_frames([base])
+    assert "foundation" not in plain.channels and plain.X.shape[1] == len(features.ALL)           # existing runs are unchanged
+
+
+def test_a_dataset_never_silently_drops_a_foundation_model_with_no_forecasts():
+    daily, _ = _synthetic(300)
+    with pytest.raises(RuntimeError, match="forecast-run"):
+        features.foundation_frame("BTCUSDT", daily, ["chronos2"])

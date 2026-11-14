@@ -16,6 +16,50 @@ def _fmt_verdict(v: dict) -> str:
     return "\n".join(lines)
 
 
+def _forecast_command(args) -> int:
+    from .forecast import fetch, models, report
+
+    if args.cmd == "forecast-fetch":
+        entry = fetch.fetch_weights(args.model)
+        for repo, info in entry["repos"].items():
+            print(repo, info["revision"][:12], f"{sum(f['size'] for f in info['files']) / 1e6:.1f} MB", [f["name"] for f in info["files"]])
+        return 0
+    if args.cmd == "forecast-fetch-code":
+        info = fetch.fetch_code()
+        print(f"cloned {info['repo']} at {info['commit'][:12]}; {len(info['python_files'])} python files to review before running:")
+        print("\n".join("  " + p for p in info["python_files"]))
+        return 0
+    if args.cmd == "forecast-eval":
+        out = report.run_all()
+        text = report.to_markdown(out)
+        print(text)
+        if args.write:
+            (config.root() / "docs" / "forecast-eval.md").write_text(text)
+            print("wrote docs/forecast-eval.md")
+        return 0
+    # forecast-run
+    import pandas as pd
+
+    from .eval.data import load_bars
+    from .forecast import generate
+
+    problems = fetch.verify(args.model)
+    if args.model.startswith("kronos"):
+        lock = models.load_lock().get("kronos_code")
+        if not lock or not lock.get("reviewed"):
+            problems.append("the Kronos source has not been fetched and marked reviewed (forecast-fetch-code, then set kronos_code.reviewed in config/forecast_models.lock.json after reading it)")
+    if problems:
+        print("\n".join(problems))
+        return 2
+    fc = models.get(args.model)
+    since = pd.Timestamp(args.since, tz="UTC") if args.since else None
+    for sym in ("BTCUSDT", "ETHUSDT"):
+        c = generate.generate(fc, sym, load_bars(sym, "1d"), stride=args.stride, since=since, max_new=args.max_new,
+                              progress=lambda done, total, s=sym: print(f"  {s}: {done}/{total}", flush=True))
+        print(f"{args.model} {sym}: {len(c)} forecasts cached")
+    return 0
+
+
 def _trading_command(args) -> int:
     from .trading import book, limits as tl, service, venues
     from .trading.types import OrderIntent
@@ -127,6 +171,16 @@ def main(argv: list[str] | None = None) -> int:
     ordp.add_argument("--venue", choices=["paper", "testnet"], default=None)
     rp = sub.add_parser("replay", help="replay stored BTC/ETH history through the real risk gate and paper broker; checks invariants, compares with the baselines")
     rp.add_argument("--write", action="store_true", help="write docs/phase4-replay.md")
+    ff = sub.add_parser("forecast-fetch", help="DOWNLOAD a forecaster's weights from Hugging Face into the local cache and record their hashes (the only command that downloads models)")
+    ff.add_argument("model", choices=["kronos_small", "chronos2", "timesfm25"])
+    sub.add_parser("forecast-fetch-code", help="git-clone the Kronos source into models/kronos-src for review; never runs it")
+    fr = sub.add_parser("forecast-run", help="generate walk-forward forecasts for a model (runs in its own process; weights must be fetched first)")
+    fr.add_argument("model", choices=["kronos_small", "chronos2", "timesfm25"])
+    fr.add_argument("--stride", type=int, default=None, help="forecast every Nth day (default depends on the model)")
+    fr.add_argument("--since", default=None, help="only origins on or after this date, e.g. 2025-08-02")
+    fr.add_argument("--max-new", type=int, default=None, help="stop after this many new forecasts per symbol (for a timing trial)")
+    fe = sub.add_parser("forecast-eval", help="score cached forecasts against a random walk; writes docs/forecast-eval.md with --write")
+    fe.add_argument("--write", action="store_true")
     posp = sub.add_parser("positions", help="account: equity, open positions, realised result, halts")
     posp.add_argument("--venue", choices=["paper", "testnet"], default="paper", help="paper = local simulator (default); testnet = Binance Spot Testnet, virtual money")
     tk = sub.add_parser("paper-tick", help="check for triggered stops and take profits (stored bars for paper, the exchange for testnet); snapshot equity")
@@ -177,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
     if args.cmd in ("propose", "approve", "reject", "orders", "positions", "paper-tick", "kill", "unkill", "unhalt", "limits-pin"):
         return _trading_command(args)
+    if args.cmd in ("forecast-fetch", "forecast-fetch-code", "forecast-run", "forecast-eval"):
+        return _forecast_command(args)
     if args.cmd == "replay":
         from .trading import replay_report
 

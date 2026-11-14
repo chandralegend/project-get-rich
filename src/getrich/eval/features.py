@@ -94,7 +94,8 @@ class Dataset:
 
 def build_symbol_frame(symbol: str, daily: pd.DataFrame, hourly: pd.DataFrame, cost: CostModel, *,
                        tp_mult: float = 2.0, sl_mult: float = 1.0, horizon: int = 10,
-                       primary_min_votes: float | None = None) -> pd.DataFrame:
+                       primary_min_votes: float | None = None, foundation: pd.DataFrame | None = None) -> pd.DataFrame:
+    """`foundation`: optional features from the pretrained forecasters, indexed by origin bar. When given, only the rows that have them are kept."""
     rv = har.daily_rv_from_hourly(hourly)
     har_vol = np.sqrt(har.har_forecast(rv) * 365).reindex(daily.index)
     feats = pd.concat([market_features(daily), forecast_features(daily, har_vol)], axis=1)
@@ -110,24 +111,49 @@ def build_symbol_frame(symbol: str, daily: pd.DataFrame, hourly: pd.DataFrame, c
     lab["aux_ret"] = ret_next.clip(-5, 5).reindex(lab.index)
     lab["aux_rv"] = np.log(rv.shift(-1).reindex(lab.index))
     out = lab.join(feats[ALL], how="inner")
+    extra: list[str] = []
+    if foundation is not None:
+        extra = list(foundation.columns)
+        out = out.join(foundation, how="inner")
     out["asset"] = symbol
-    out = out.dropna(subset=ALL)
+    out = out.dropna(subset=ALL + extra)
     if primary_min_votes is not None:   # meta-labelling: keep only the days the primary (trend) rule says long
         out = out[out["trend_votes"] >= primary_min_votes - 1e-9]
     return out
 
 
-def make_dataset(symbols=("BTCUSDT", "ETHUSDT"), cost: CostModel | None = None, **kw) -> Dataset:
+def foundation_frame(symbol: str, daily: pd.DataFrame, models: list[str]) -> pd.DataFrame:
+    """Cached forecaster features for one symbol, joined across models. Raises if a model has no cache: never silently drops a channel."""
+    from ..forecast.base import load_cache
+    from ..forecast.features import foundation_features
+
+    sigma = labels.daily_vol(daily["close"])
+    parts = []
+    for m in models:
+        c = load_cache(m, symbol)
+        if c is None or len(c) == 0:
+            raise RuntimeError(f"no cached forecasts for {m} {symbol}: run `getrich forecast-run {m}` first")
+        parts.append(foundation_features(c, sigma, m))
+    return pd.concat(parts, axis=1)
+
+
+def make_dataset(symbols=("BTCUSDT", "ETHUSDT"), cost: CostModel | None = None, foundation_models: list[str] | None = None, **kw) -> Dataset:
     cost = cost or CostModel()
-    frames = [build_symbol_frame(s, load_bars(s, "1d"), load_bars(s, "1h"), cost, **kw) for s in symbols]
-    return from_frames(frames)
+    frames, extra = [], []
+    for s in symbols:
+        daily = load_bars(s, "1d")
+        fnd = foundation_frame(s, daily, foundation_models) if foundation_models else None
+        extra = list(fnd.columns) if fnd is not None else []
+        frames.append(build_symbol_frame(s, daily, load_bars(s, "1h"), cost, foundation=fnd, **kw))
+    return from_frames(frames, extra=extra)
 
 
-def from_frames(frames: list[pd.DataFrame]) -> Dataset:
+def from_frames(frames: list[pd.DataFrame], extra: list[str] | None = None) -> Dataset:
+    extra = extra or []
     df = pd.concat(frames).reset_index().rename(columns={"index": "bar"})
     df = df.sort_values(["t0", "asset"], kind="stable").reset_index(drop=True)
     return Dataset(
-        X=df[ALL].to_numpy(dtype=np.float32),
+        X=df[ALL + extra].to_numpy(dtype=np.float32),
         y=df["label"].to_numpy(dtype=int),
         r_net=df["r_net"].to_numpy(dtype=float),
         r_gross=df["r_gross"].to_numpy(dtype=float),
@@ -137,4 +163,6 @@ def from_frames(frames: list[pd.DataFrame]) -> Dataset:
         asset=df["asset"].to_numpy(),
         bar=pd.DatetimeIndex(df["bar"]),
         aux=df[["aux_ret", "aux_rv"]].to_numpy(dtype=float),
+        columns=list(ALL) + extra,
+        channels={**CHANNELS, **({"foundation": extra} if extra else {})},
     )

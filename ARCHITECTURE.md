@@ -113,7 +113,7 @@ Bitemporal news table: `published_at` (source claim) and `ingested_at` (your clo
 | Channel | Input | Encoder | Trainable? | Backfillable? |
 |---|---|---|---|---|
 | Market | Daily OHLCV windows (multi-scale), volatility, funding/OI for crypto | Small GRU or TCN, or hand features | Yes (small) | Yes |
-| Forecast | HAR volatility; Chronos-2 / TimesFM 2.5 quantiles normalised by volatility | Linear projection of the numeric vector | Projection only; forecasters frozen | Yes, but see leakage note below |
+| Forecast | HAR volatility; Chronos-2 / TimesFM 2.5 quantiles normalised by volatility | Linear projection of the numeric vector | Projection only; forecasters frozen | Yes, but see leakage note below **Status 2026-11-14: HAR only is in the PI-Net. The pretrained-forecaster layer (Kronos, Chronos-2, TimesFM 2.5) is built, tested and isolated per model but has no real forecasts yet: weights are not downloaded. See docs/forecast-models.md.** |
 | Raw text | Headlines, announcements, central-bank text embedded by a frozen local model (bge-m3 or Qwen3-Embedding-0.6B), time-decayed over a window | Small trainable attention pooling | Pooling only; embedder frozen | Yes, from free archives such as GDELT [verify coverage and terms] |
 | Claude research | Structured insight fields (event type, direction, horizon, magnitude, confidence, novelty, source count) plus a local embedding of the insight summary | Small MLP | Yes | **No** (forward-only, see below) |
 | Context | Asset id embedding, volatility regime, scheduled-event calendar | Embeddings | Yes | Yes |
