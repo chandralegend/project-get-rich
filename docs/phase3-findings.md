@@ -1,6 +1,6 @@
 # Phase 3 findings: meta-labelling result and the agent layer
 
-Date: 2026-11-14. Two parts: the pre-registered meta-label experiment (a null result), and the Claude agent layer (built and tested, not yet run against the real API because there is no API key in `.env`). The last section assesses the Agent SDK and subscription ideas.
+Date: 2026-11-14. Two parts: the pre-registered meta-label experiment (a null result), and the Claude agent layer (built, tested, and run live for the first time on the same day, see sections 2 and 4). The last section assesses the Agent SDK and subscription ideas.
 
 ## 1. Meta-labelling the trend rule: not shown
 
@@ -19,7 +19,7 @@ Two honest notes. First, the LightGBM filter ended with about the same Sharpe as
 
 Together with Phase 2, this is two designs on the same price-and-volatility features with no detectable edge, which matches the earlier research.
 
-## 2. The agent layer (built and tested, not yet run live)
+## 2. The agent layer (built, tested, first live runs in section 4)
 
 What exists, all under `src/getrich/llm/` and `src/getrich/agents/`:
 
@@ -70,7 +70,7 @@ A split that stays clearly inside "ordinary use": scheduled unattended runs use 
 
 I recommended the Messages API with server-side tools as the simpler option; you chose the Agent SDK, locked down, so that is what is built.
 
-## 4. The Investigator (Agent SDK, locked down): built, not yet run live
+## 4. The Investigator (Agent SDK, locked down)
 
 `uv run getrich investigate "<question>" [--max-usd 0.75] [--max-turns 15] [--dry-run]`. Code: `agents/investigator.py`, `investigator_policy.py`, `investigator_tools.py`.
 
@@ -91,7 +91,17 @@ I recommended the Messages API with server-side tools as the simpler option; you
 
 **Verified:** 48 tests with a scripted fake agent that calls the real registered hooks (URL rules, allowlist, limits, evidence capture, injection handling, citations, failure and cost paths, lockdown options). The real SDK (0.2.182) also accepted these options and returned only an authentication error for a deliberately bogus key, so the option names and the empty config directory are accepted by the real binary.
 
-**Not verified, needs a real key:** whether the model can load our tool schemas under the allowlist (I allow `ToolSearch` and the SDK's `StructuredOutput` for this), the exact shape of the `WebFetch` result the post-hook receives (the capture code handles strings and common dict keys), the exact `WebFetch` input key (assumed `url`), and real per-run cost. Run `getrich investigate "<question>" --dry-run`, then one real run with a low `--max-usd` and read the event log.
+**First live runs (2026-11-14, API key added):**
+- *Extraction:* 85 real news items sent through Haiku, 33 events recorded, 0 failures, about $0.0002 per item, matching the estimate.
+- *Briefing:* Sonnet, $0.021. The first call was rejected because a risk flag cited no evidence, so the rule changed: an individual flag or view that cites nothing, or cites something the model was not shown, is now dropped and counted (`dropped_ungrounded`) instead of discarding the whole briefing. Every other validation failure still rejects it. The briefing said plainly that the news did not explain the BTC and ETH sell-off. One flag it kept cites an event that is only loosely about its claim, which is a reminder that "has a citation" is not "is supported".
+- *Investigator:* two runs. The first ($0.047) was rejected because the agent cited its own price-snapshot output; the prompt now says market-tool output is context, not a citation, and uncited items are dropped like the briefing's, except that citing a page flagged as hostile still rejects the whole run. The second ($0.100, 6 fetches, 2 searches, 0 denied calls) recorded 8 insights: it read crypto outlets, noticed the two outlets disagreed on whether the Fed had already hiked, said no primary source (Fed, BLS, CME) was among the pages, and listed what it could not settle. It returned no views. Whether any of this is right is for the scorecard to say, not for me.
+- *Now verified against the real SDK:* the model loads and calls our market tools under the allowlist, `WebSearch` works (its input also carries a `mode` key), and the capture hook receives the `WebFetch` result as text under `url`.
+- *Found and fixed:* a failed fetch (HTTP 403) arrives as ordinary text and was being stored as a page. Failed fetches are now skipped and logged as `investigator.fetch_failed`. One such row from the first live run is in `news_items` (source `web:www.fastcompany.com`); it is harmless but listed under that run's pages.
+
+**Caveats that matter:**
+- `WebFetch` returns a model-written extract of the page, not the raw text. What is stored as evidence is that extract, one layer removed from the source, and it can be stale (one fetched article was dated June 2025). Treat investigator evidence as secondary.
+- The agent's sources were secondary outlets that disagreed with each other. It said so, which is the good behaviour, but its findings are unverified until scored.
+- A run costs roughly $0.05 to $0.10 so far, well under the $0.75 limit. Total live spend today: about $0.20.
 
 **Subscription:** this job needs an API key (see section 3). Using it inside your own interactive Claude Code sessions is separate and unaffected.
 
@@ -102,5 +112,5 @@ uv run getrich run-meta                      # the pre-registered experiment (ab
 uv run getrich agents-extract --dry-run      # what the extraction would do and cost
 uv run getrich agents-briefing --dry-run
 uv run getrich agents-status
-uv run pytest                                # 226 tests, none of which call the real API
+uv run pytest                                # 232 tests, none of which call the real API
 ```

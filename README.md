@@ -2,7 +2,7 @@
 
 A local-first research and trading system for crypto, gold and FX, built for personal use. Claude reads the news, a model trained on the collected data scores setups, and a separate risk gate plus a human approve every order.
 
-**Status: Phase 0 (foundations) finishing, Phases 1 to 3 built. No model has shown a detectable edge ([Phase 2](docs/phase2-findings.md), [Phase 3](docs/phase3-findings.md)); the Claude agent layer (curated pipeline plus a locked-down, shadow-only Agent SDK Investigator) is built and tested but has not been run against the real API yet.** Nothing here trades. It collects data, records everything to an event log, and watches itself. What is left to finish Phase 0 is in [docs/phase0-checklist.md](docs/phase0-checklist.md).
+**Status: Phase 0 (foundations) finishing, Phases 1 to 3 built. No model has shown a detectable edge ([Phase 2](docs/phase2-findings.md), [Phase 3](docs/phase3-findings.md)); the Claude agent layer (curated pipeline plus a locked-down, shadow-only Agent SDK Investigator) is built, tested and has had its first live runs (a few tens of cents, nothing scheduled yet); its output is unscored so far.** Nothing here trades. It collects data, records everything to an event log, and watches itself. What is left to finish Phase 0 is in [docs/phase0-checklist.md](docs/phase0-checklist.md).
 
 - Design: [ARCHITECTURE.md](ARCHITECTURE.md) and the [diagram page](docs/architecture-map.html)
 - Research behind it: [research/00-master-report.md](research/00-master-report.md) (reports 01 to 11 sit beside it)

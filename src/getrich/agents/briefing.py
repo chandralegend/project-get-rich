@@ -93,9 +93,15 @@ def run(llm: ClaudeLLM | None = None, hours: int = 24, dry_run: bool = False) ->
     if dry_run:
         return out
     allowed = {e["ref"] for e in events}
+    dropped = [0]
+
+    def check(d):
+        dropped[0] = schemas.drop_ungrounded(d, allowed)
+        return schemas.validate_briefing(d, allowed)
+
     try:
         data, info = llm.call_json(purpose="briefing", model=pricing.SONNET, system=SYSTEM, user=user, schema=schemas.BRIEFING_SCHEMA,
-                                   validate=lambda d: schemas.validate_briefing(d, allowed), max_tokens=MAX_OUTPUT_TOKENS, effort="medium")
+                                   validate=check, max_tokens=MAX_OUTPUT_TOKENS, effort="medium")
     except budget.BudgetExceeded as exc:
         out["skipped"] = f"budget: {exc}"
         return out
@@ -107,7 +113,7 @@ def run(llm: ClaudeLLM | None = None, hours: int = 24, dry_run: bool = False) ->
     with connect() as con:
         bid = record_insight(con, asset="MARKET", evidence=sorted(allowed), model=pricing.SONNET, as_of=now, payload={
             "kind": "briefing", "headline": data["headline"], "summary": data["summary"], "regime": data["regime"],
-            "watch_next": data["watch_next"], "n_events": len(events), "withheld_suspicious": withheld, "cost_usd": info["cost_usd"]})
+            "watch_next": data["watch_next"], "n_events": len(events), "withheld_suspicious": withheld, "dropped_ungrounded": dropped[0], "cost_usd": info["cost_usd"]})
         for f in data["risk_flags"]:
             record_insight(con, asset=f["asset"], evidence=f["evidence"], model=pricing.SONNET, as_of=now, payload={
                 "kind": "risk_flag", "source": "briefing", "flag": f["flag"], "severity": f["severity"], "reason": f["reason"], "briefing_id": bid})
@@ -118,7 +124,7 @@ def run(llm: ClaudeLLM | None = None, hours: int = 24, dry_run: bool = False) ->
     out.update(recorded=1 + len(data["risk_flags"]) + len(data["views"]), briefing_id=bid)
     out["path"] = str(_write_markdown(data, snapshot, events, withheld, info, now))
     emit("agents.briefing", service=SERVICE, briefing_id=bid, events=len(events), flags=len(data["risk_flags"]),
-         views=len(data["views"]), cost_usd=info["cost_usd"])
+         views=len(data["views"]), dropped_ungrounded=dropped[0], cost_usd=info["cost_usd"])
     return out
 
 

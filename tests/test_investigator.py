@@ -107,6 +107,26 @@ def test_a_page_that_tries_to_instruct_the_agent_is_flagged_warned_about_and_not
     assert '"investigator.page_captured"' in log_text()
 
 
+@pytest.mark.parametrize("text", [
+    "The server returned HTTP 403 Forbidden.\n\nThe response body was not retrieved. If this URL requires authentication, use an authenticated tool.",
+    "Request timed out after 30s", "   ",
+])
+def test_a_failed_fetch_is_not_stored_as_a_page(text):
+    s = policy.RunState()
+    assert _post(s, URL, text) == {}
+    assert s.fetched == {} and s.failed_fetches == 1
+    assert '"investigator.fetch_failed"' in log_text()
+    with connect() as con:
+        assert con.execute("SELECT count(*) FROM news_items WHERE source LIKE 'web:%'").fetchone()[0] == 0
+
+
+def test_a_real_article_that_mentions_an_http_error_is_still_stored():
+    article = "Analysts say the exchange outage, which produced HTTP 503 errors for users, deepened the selloff. " * 8
+    s = policy.RunState()
+    _post(s, URL, article)
+    assert policy.normalize_url(URL) in s.fetched
+
+
 def test_search_results_are_not_stored_only_fetched_pages():
     s = policy.RunState()
     hook = policy.make_post_hook(s)
@@ -230,13 +250,25 @@ def test_a_good_run_is_recorded_with_citations_cost_and_a_readable_file(market):
     assert '"llm.call"' in log and '"purpose":"investigator"' in log and '"investigator.run"' in log
 
 
-def test_citing_a_page_that_was_never_fetched_is_rejected_but_the_cost_is_still_counted(market):
+def test_citing_a_page_that_was_never_fetched_stores_nothing_and_the_cost_is_still_counted(market):
     bad = good_output(cite="https://news.example.com/invented-story")
     out = investigator.investigate("q", query_fn=scripted(ResultMessage(structured_output=bad)))
-    assert out["status"] == "rejected" and "not fetched" in out["note"] and out["recorded"] == 0
+    assert out["status"] == "unrecorded" and "valid citation" in out["note"] and out["recorded"] == 0
+    assert "Fed held rates" in open(out["path"]).read()                       # the readable report is kept, the ledger gets nothing
     with connect() as con:
         assert con.execute("SELECT count(*) FROM insights").fetchone()[0] == 0
     assert '"cost_usd":0.12' in log_text()
+
+
+def test_uncited_items_are_dropped_and_counted_but_cited_ones_are_recorded(market):
+    out_data = good_output()
+    out_data["findings"].append({"claim": "Derived from the price snapshot only.", "asset": "BTC", "direction": "down", "confidence": 0.5,
+                                 "evidence": ["mcp__market__get_snapshot BTC close 68314"]})
+    out = investigator.investigate("q", query_fn=scripted(ResultMessage(structured_output=out_data)))
+    assert out["status"] == "recorded" and out["recorded"] == 4 and "1 item(s)" in out["note"]
+    with connect() as con:
+        summary = json.loads(con.execute("SELECT payload FROM insights WHERE json_extract_string(payload, '$.kind') = 'investigation'").fetchone()[0])
+    assert summary["dropped_ungrounded"] == 1 and summary["n_findings"] == 1
 
 
 def test_citing_a_hostile_page_is_rejected(market):

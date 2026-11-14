@@ -94,6 +94,26 @@ def validate_extraction(d) -> list[str]:
     return errs
 
 
+def drop_ungrounded(d, allowed_evidence: set[str], keys=("risk_flags", "views")) -> int:
+    """Remove risk flags and views that cite no evidence or evidence the model was not shown (in place). Returns how many.
+
+    One ungrounded item should not throw away a whole briefing that cost money to produce, but it is never kept either,
+    and the count is recorded so a model that does this often is visible.
+    """
+    dropped = 0
+    if not isinstance(d, dict):
+        return 0
+    for key in keys:
+        items = d.get(key)
+        if not isinstance(items, list):
+            continue
+        keep = [i for i in items if isinstance(i, dict) and isinstance(i.get("evidence"), list) and i["evidence"]
+                and all(e in allowed_evidence for e in i["evidence"])]
+        dropped += len(items) - len(keep)
+        d[key] = keep
+    return dropped
+
+
 def validate_briefing(d, allowed_evidence: set[str]) -> list[str]:
     if not isinstance(d, dict):
         return ["not an object"]

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import re
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit, urlunsplit
 
@@ -48,6 +49,7 @@ class RunState:
     fetches: int = 0
     searches: int = 0
     calls: int = 0
+    failed_fetches: int = 0
     denied: list[tuple[str, str]] = field(default_factory=list)
     fetched: dict[str, dict] = field(default_factory=dict)      # normalised url -> {item_id, suspect, content}
     event_refs: set[str] = field(default_factory=set)           # item ids returned by the get_events tool
@@ -136,6 +138,15 @@ def _text_of(response) -> str:
     return json.dumps(response, default=str)
 
 
+_FAILURE = re.compile(r"HTTP [45]\d\d|timed? ?out|response body was not retrieved|unable to (fetch|retrieve)|could not (fetch|retrieve)|redirect", re.I)
+
+
+def looks_like_fetch_failure(text: str) -> bool:
+    """WebFetch reports errors as ordinary text. A short message that talks about HTTP errors or timeouts is not a page."""
+    t = (text or "").strip()
+    return not t or (len(t) < 400 and bool(_FAILURE.search(t)))
+
+
 def store_page(state: RunState, url: str, content: str) -> tuple[str, list[str]]:
     """Save a fetched page as a timestamped news item (evidence). Returns (item_id, injection flags)."""
     norm = normalize_url(url)
@@ -163,7 +174,12 @@ def make_post_hook(state: RunState):
         if name != "WebFetch":
             return {}
         url = (input_data.get("tool_input") or {}).get("url", "")
-        item_id, flags = store_page(state, url, _text_of(input_data.get("tool_response")))
+        text = _text_of(input_data.get("tool_response"))
+        if looks_like_fetch_failure(text):                         # an error message is not evidence
+            state.failed_fetches += 1
+            emit("investigator.fetch_failed", service=SERVICE, level="warn", run_id=state.run_id, url=normalize_url(url), detail=text[:160])
+            return {}
+        item_id, flags = store_page(state, url, text)
         emit("investigator.page_captured", service=SERVICE, run_id=state.run_id, item_id=item_id, url=normalize_url(url), injection_flags=flags)
         if flags:
             return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext":

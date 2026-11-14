@@ -98,23 +98,38 @@ def test_suspicious_events_never_reach_the_briefing_model():
     assert out["withheld"] == 1 and out["events"] == 1
 
 
-def test_made_up_evidence_is_rejected_and_nothing_is_recorded():
+def kinds_recorded():
+    with connect() as con:
+        return [json.loads(p)["kind"] for (p,) in con.execute("SELECT payload FROM insights WHERE json_extract_string(payload, '$.kind') <> 'event_extraction' ORDER BY seq").fetchall()]
+
+
+def test_made_up_evidence_is_dropped_never_recorded_and_counted():
     with connect() as con:
         seed_market(con)
         seed_event(con, "n1")
     out = briefing.run(ClaudeLLM(FakeSDK(brief(["n_invented"]))))
-    assert "model call failed" in out["skipped"]
+    assert out["skipped"] is None and out["recorded"] == 1                  # the briefing text is kept, the ungrounded flag and view are not
+    assert kinds_recorded() == ["briefing"]
     with connect() as con:
-        assert con.execute("SELECT count(*) FROM insights WHERE json_extract_string(payload, '$.kind') <> 'event_extraction'").fetchone()[0] == 0
+        payload = json.loads(con.execute("SELECT payload FROM insights WHERE json_extract_string(payload, '$.kind') = 'briefing'").fetchone()[0])
+    assert payload["dropped_ungrounded"] == 2
 
 
-def test_a_flag_or_view_without_evidence_is_rejected():
+def test_a_flag_or_view_without_evidence_is_dropped_but_grounded_ones_survive():
     with connect() as con:
         seed_market(con)
         seed_event(con, "n1")
     bad = brief(["n1"], views=[{"asset": "ETH", "direction": "up", "horizon_days": 7, "confidence": 0.4, "evidence": []}])
     out = briefing.run(ClaudeLLM(FakeSDK(bad)))
-    assert "model call failed" in out["skipped"]
+    assert out["recorded"] == 2 and kinds_recorded() == ["briefing", "risk_flag"]
+
+
+def test_other_validation_failures_still_reject_the_whole_briefing():
+    with connect() as con:
+        seed_market(con)
+        seed_event(con, "n1")
+    out = briefing.run(ClaudeLLM(FakeSDK(brief(["n1"], regime="euphoric-nonsense"))))
+    assert "model call failed" in out["skipped"] and kinds_recorded() == []
 
 
 def test_the_cap_stops_the_briefing(monkeypatch):
