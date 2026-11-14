@@ -13,9 +13,10 @@ A local-first research and trading system for crypto, gold and FX, built for per
 
 ```bash
 uv sync
-uv run pytest                  # 177 tests, offline, none call the real API
+uv run pytest                  # 304 tests, offline, none call the real API
 uv run getrich collect-binance # closed daily bars for BTCUSDT and ETHUSDT (public API, no key)
 uv run getrich collect-news    # primary-source RSS (Fed, ECB, BoE, BoC, BoJ; SEC too if GETRICH_CONTACT is set in .env). Crypto outlets are excluded: docs/news-feed-terms.md
+uv run getrich collect-webnews # open web headlines: GDELT raw files and Google News RSS, filtered to crypto, gold, FX and rates
 uv run getrich watchdog        # run every health check once
 uv run getrich status          # the status screen
 uv run getrich doctor          # check this Mac against the hardening list
@@ -31,6 +32,10 @@ uv run getrich agents-extract --dry-run   # Haiku extraction: what it would do a
 uv run getrich agents-briefing --dry-run  # Sonnet briefing, flags and shadow views
 uv run getrich investigate "What did the Fed just signal?" --dry-run   # locked-down research agent (Agent SDK): shows its lockdown config, starts nothing
 uv run getrich agents-status   # Claude spend against the cap, ledger and scorecard
+uv run getrich propose buy BTCUSDT --stop 64900   # PAPER order: runs the risk gate, prints its verdict, sends nothing
+uv run getrich approve <order_id>                # you approve (typed yes); there is no auto-submit
+uv run getrich positions       # paper equity, positions, realised result, halts  (add --venue testnet for the Binance testnet)
+uv run getrich kill            # kill switch: flatten everything, block new positions (unkill / unhalt to resume)
 ```
 
 Run unattended with launchd (user-level, no sudo). Preview first, then install:

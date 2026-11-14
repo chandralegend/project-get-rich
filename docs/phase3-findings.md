@@ -106,6 +106,17 @@ I recommended the Messages API with server-side tools as the simpler option; you
 - The agent's sources were secondary outlets that disagreed with each other. It said so, which is the good behaviour, but its findings are unverified until scored.
 - A run costs roughly $0.05 to $0.10 so far, well under the $0.75 limit. Total live spend today: about $0.28.
 
+### Web news sources (added 2026-11-14)
+
+You pointed me at godseyeview.ai. It is an open-source 3D globe of public feeds (aircraft, ships, quakes, weather), not a finance tool, and its news layer is simple: **GDELT** read from its raw 15-minute files with no key, **Google News RSS** for regional headlines, and optional keyed APIs (World News API, Liveuamap). It classifies news with bundled rules, no language model. I took its two keyless backbones and pointed them at crypto, gold, FX and rates, and let Haiku do the classification as everywhere else (`getrich collect-webnews`, hourly job installed).
+
+- **GDELT via raw files, not the search API.** The search API answered 429 from this connection even for single requests 12 seconds apart (and rejected one of my query forms), so the collector reads the GKG files instead (about 2.5 MB per 15 minutes) and filters by title pattern and language locally. A live run kept 12 items from 11 outlets in an hour.
+- **Google News RSS:** 8 topic queries, newest 15 each, about 120 headlines on the first run.
+- **Also added to the feed collector:** Coinbase and Kraken status feeds and Bitcoin Core and go-ethereum release feeds, which cover exchange incidents and protocol risk, the crypto-specific events the central-bank feeds miss.
+- **First yield:** of 80 new headlines, 42 were dropped by the local pre-filter, 5 were duplicates, 33 went to Haiku and 29 became events, for about $0.01. Hourly extraction now takes up to 80 items a run. The monthly cap and `agents-status` still bound spend.
+- **Limits:** headlines only, from outlets of mixed quality, with no article text, so these events are weaker evidence than a central-bank release. The scorecard will show whether they earn anything. Crypto outlets are still not scraped directly; GDELT and Google News carry their headlines indirectly.
+- Terms were not weighed, at your direction; what the earlier read found is listed for your review in [news-feed-terms.md](news-feed-terms.md).
+
 **Subscription:** this job needs an API key (see section 3). Using it inside your own interactive Claude Code sessions is separate and unaffected.
 
 ## Reproduce
@@ -115,5 +126,5 @@ uv run getrich run-meta                      # the pre-registered experiment (ab
 uv run getrich agents-extract --dry-run      # what the extraction would do and cost
 uv run getrich agents-briefing --dry-run
 uv run getrich agents-status
-uv run pytest                                # 232 tests, none of which call the real API
+uv run pytest                                # 242 tests, none of which call the real API
 ```

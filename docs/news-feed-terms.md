@@ -39,3 +39,12 @@ Consequence: crypto-specific events (listings, hacks, stablecoin stress) are sti
 - The Fed's and BoJ's robots files return 404, so their robots rules are unknown. Their copyright pages permit copying.
 - Attribution is required by most of these sources. Stored items keep their source key and URL, and the briefing and Investigator reports name the source.
 - Storing a short summary and sending it to an LLM for classification is not addressed by any of the primary-source texts. The reuse statements are broad (copy and distribute), and this is personal, non-commercial use, but it remains your call.
+
+## For your review: web-news sources added on 2026-11-14
+
+You decided to review terms yourself, so these were adopted without a terms judgement. What the 2026-11-14 read found, in one place:
+
+- **GDELT** (`collectors/webnews.py`): its terms say the data is available for "unrestricted use" and "must include a citation to the GDELT Project". Items are stored as `gdelt:<domain>` with the article URL; add a GDELT credit if you ever publish anything built on them.
+- **Google News RSS** (`collectors/webnews.py`): the feed's own copyright line says it is for "a personal feed reader for personal, non-commercial use" and that any other use is prohibited.
+- **Coinbase and Kraken status feeds, Bitcoin Core and go-ethereum release feeds** (`collectors/news.py`): feeds exist and are public. Their usage terms were not read. GitHub's terms do not restrict lawful access to public content, and reuse of release text follows each repository's licence, which was not checked.
+- **Not adopted, because the read found them restrictive:** FRED/ALFRED (forbids storing or caching), NewsAPI free tier (development use only), Bing News. **Unclear or unreachable:** Binance announcements (no feed found, so not collected), Federal Register API (bot check), CoinMarketCap content endpoints, Alpha Vantage, Marketaux, Finnhub, Tiingo (internal use only).

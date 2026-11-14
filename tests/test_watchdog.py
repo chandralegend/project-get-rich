@@ -1,6 +1,7 @@
 import json
 
 from getrich import config
+from getrich.obs.events import emit, utcnow
 from getrich.obs.heartbeat import beat
 from getrich.ops import watchdog
 
@@ -137,3 +138,34 @@ def test_the_status_screen_shows_claude_spend(monkeypatch):
     status.render(console)
     text = console.export_text()          # export_text clears the buffer, so read it once
     assert "$1.50" in text and "of $30.00" in text
+
+
+# ------------------------------------------------------------------ order-path alerts
+
+
+def _keys(alerts):
+    return {a.key: a.severity for a in alerts}
+
+
+def test_a_latched_drawdown_halt_and_the_kill_switch_raise_alerts_that_clear_when_the_owner_clears_them():
+    from getrich.trading import book
+
+    book.halt_path().parent.mkdir(parents=True, exist_ok=True)
+    book.halt_path().write_text("x")
+    book.kill_path().write_text("x")
+    keys = _keys(watchdog._trading_alerts(utcnow()))
+    assert keys["risk_halt_latched"] == "P1" and keys["kill_switch_on"] == "P1"
+    book.halt_path().unlink()
+    book.kill_path().unlink()
+    assert not {"risk_halt_latched", "kill_switch_on"} & set(_keys(watchdog._trading_alerts(utcnow())))
+
+
+def test_an_unprotected_position_or_a_missing_stop_is_a_p0():
+    emit("broker.unprotected_position", service="broker.testnet", level="error", symbol="BTCUSDT")
+    emit("broker.stop_missing", service="broker.testnet", level="error", symbol="BTCUSDT")
+    keys = _keys(watchdog._trading_alerts(utcnow()))
+    assert keys["unprotected_position"] == "P0" and keys["stop_missing"] == "P0"
+
+
+def test_no_alerts_when_the_order_path_is_quiet():
+    assert watchdog._trading_alerts(utcnow()) == []

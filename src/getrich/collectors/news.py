@@ -33,6 +33,11 @@ DEFAULT_FEEDS = {
     "fed.speeches": "https://www.federalreserve.gov/feeds/speeches.xml",
     "boc.press": "https://www.bankofcanada.ca/content_type/press-releases/feed/",
     "boj.news": "https://www.boj.or.jp/en/rss/whatsnew.xml",       # headlines only: the feed has no descriptions
+    # exchange incident feeds and release feeds of the core crypto software: operational and protocol risk events
+    "coinbase.status": "https://status.coinbase.com/history.rss",
+    "kraken.status": "https://status.kraken.com/history.rss",
+    "gh.bitcoin": "https://github.com/bitcoin/bitcoin/releases.atom",
+    "gh.geth": "https://github.com/ethereum/go-ethereum/releases.atom",
 }
 SEC_FEED = {"sec.press": "https://www.sec.gov/news/pressreleases.rss"}
 SEC_SOURCE = "sec.press"
@@ -83,6 +88,21 @@ def parse_feed(source: str, content: bytes) -> list[dict]:
     return items
 
 
+def store_items(items: list[dict]) -> list[tuple]:
+    """Insert items we have not seen (by content hash) and log each as news.ingested. Returns the new rows."""
+    new_rows = []
+    with connect() as con:
+        for it in items:
+            if con.execute("SELECT 1 FROM news_items WHERE content_hash = ?", [it["content_hash"]]).fetchone():
+                continue
+            row = (new_id("n"), it["source"], it["url"], it["title"], it["summary"], it["published_at"], utcnow(), it["content_hash"])
+            con.execute("INSERT INTO news_items VALUES (?,?,?,?,?,?,?,?)", row)
+            new_rows.append(row)
+    for row in new_rows:  # events are written after the lock is released
+        emit("news.ingested", service=SERVICE, item_id=row[0], source=row[1], title=row[3], published_at=row[5], ingested_at=row[6])
+    return new_rows
+
+
 def collect(feeds: dict[str, str] | None = None, client: httpx.Client | None = None) -> tuple[bool, dict[str, int]]:
     feeds = feeds or default_feeds()
     own = client is None
@@ -98,22 +118,7 @@ def collect(feeds: dict[str, str] | None = None, client: httpx.Client | None = N
                 ok = False
                 emit("collector.error", service=SERVICE, level="error", source=source, error=repr(exc))
                 continue
-            new_rows = []
-            with connect() as con:
-                for it in items:
-                    if con.execute("SELECT 1 FROM news_items WHERE content_hash = ?", [it["content_hash"]]).fetchone():
-                        continue
-                    row = (
-                        new_id("n"), it["source"], it["url"], it["title"], it["summary"],
-                        it["published_at"], utcnow(), it["content_hash"],
-                    )
-                    con.execute("INSERT INTO news_items VALUES (?,?,?,?,?,?,?,?)", row)
-                    new_rows.append(row)
-            for row in new_rows:  # events are written after the lock is released
-                emit(
-                    "news.ingested", service=SERVICE, item_id=row[0], source=row[1], title=row[3],
-                    published_at=row[5], ingested_at=row[6],
-                )
+            new_rows = store_items(items)
             summary[source] = len(new_rows)
     finally:
         if own:

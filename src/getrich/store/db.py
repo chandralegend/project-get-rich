@@ -40,6 +40,19 @@ CREATE TABLE IF NOT EXISTS item_processing (
     detail VARCHAR,
     processed_at TIMESTAMPTZ
 );
+CREATE TABLE IF NOT EXISTS orders (
+    order_id VARCHAR PRIMARY KEY, decision_id VARCHAR, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ,
+    venue VARCHAR, symbol VARCHAR, side VARCHAR,
+    status VARCHAR,             -- proposed | rejected_by_gate | rejected_by_user | expired | filled | closed | failed
+    qty DOUBLE, ref_price DOUBLE, stop_price DOUBLE, take_profit DOUBLE,
+    source VARCHAR, reason VARCHAR, verdict VARCHAR, detail VARCHAR
+);
+CREATE TABLE IF NOT EXISTS fills (
+    fill_id VARCHAR PRIMARY KEY, order_id VARCHAR, ts TIMESTAMPTZ, venue VARCHAR, symbol VARCHAR, side VARCHAR,
+    qty DOUBLE, price DOUBLE, fee DOUBLE,
+    kind VARCHAR                -- entry | exit | stop | take_profit | flatten
+);
+CREATE TABLE IF NOT EXISTS equity_snapshots (ts TIMESTAMPTZ, venue VARCHAR, equity DOUBLE, cash DOUBLE, exposure DOUBLE);
 CREATE TABLE IF NOT EXISTS insight_outcomes (
     insight_id VARCHAR PRIMARY KEY,
     resolved_at TIMESTAMPTZ,

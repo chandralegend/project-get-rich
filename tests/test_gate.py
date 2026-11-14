@@ -35,7 +35,7 @@ def _scenario(skip_collector_hours=None, watchdog_gap_minutes=0, extra=()):
     hours = int((NOW - SINCE).total_seconds() // 3600)
     for h in range(1, hours + 1):
         ts = SINCE + timedelta(hours=h) - timedelta(minutes=5)
-        for svc in ("collector.binance", "collector.news"):
+        for svc in ("collector.binance", "collector.news", "collector.webnews"):
             if svc == "collector.news" and skip_collector_hours and h in skip_collector_hours:
                 continue
             rows.append((ts, "collector.run", svc, {"ok": True}))
@@ -66,7 +66,7 @@ def _scenario(skip_collector_hours=None, watchdog_gap_minutes=0, extra=()):
 def test_healthy_week_passes_every_automatic_check_and_waits_on_the_humans(monkeypatch):
     monkeypatch.delenv("GETRICH_HEARTBEAT_URL", raising=False)
     res = _scenario()
-    for name in ("one-week window", "collector.binance runs", "collector.news runs", "watchdog continuity",
+    for name in ("one-week window", "collector.binance runs", "collector.news runs", "collector.webnews runs", "watchdog continuity",
                  "fault -> alert -> recovery", "unplanned alerts", "daily bars complete", "insight ledger chain"):
         assert res[name].status == "PASS", (name, res[name].detail)
     assert res["external heartbeat"].status == "PENDING"

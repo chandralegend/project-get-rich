@@ -9,6 +9,83 @@ import sys
 from . import config
 
 
+def _fmt_verdict(v: dict) -> str:
+    lines = [("APPROVED" if v["approved"] else "REJECTED") + f": qty {v['qty']:g}  notional ~{v['notional']:.2f}  risk {v['risk_amount']:.2f} ({v['risk_fraction']:.2%} of equity)"]
+    lines += [f"  ok   {c['check']}" + (f": {c['detail']}" if c["check"] == "sizing" else "") if c["ok"] else f"  FAIL {c['check']}: {c['detail']}" for c in v["checks"]]
+    lines += [f"  note: {r}" for r in v["reasons"] if not any(r.startswith(c["check"] + ":") for c in v["checks"] if not c["ok"])]
+    return "\n".join(lines)
+
+
+def _trading_command(args) -> int:
+    from .trading import book, limits as tl, service, venues
+    from .trading.types import OrderIntent
+
+    def broker():
+        try:
+            return venues.get_broker(args.venue)
+        except RuntimeError as exc:                         # e.g. testnet keys not set
+            print(exc)
+            raise SystemExit(2)
+
+    if args.cmd == "limits-pin":
+        print("pinned", tl.pin()[:12])
+        return 0
+    if args.cmd == "propose":
+        intent = OrderIntent(args.symbol.upper(), args.side, args.stop, args.take_profit, args.qty, args.risk, source="manual", reason=args.reason)
+        order_id, v = service.propose(intent, broker=broker())
+        print(f"proposal {order_id} ({args.venue})\n{_fmt_verdict(v)}")
+        if v["approved"]:
+            print(f"\nTo place it (valid 15 minutes):  getrich approve {order_id}\nTo drop it:                      getrich reject {order_id}")
+        return 0 if v["approved"] else 1
+    if args.cmd == "approve":
+        o = book.get_order(args.order_id)
+        if o is None:
+            print("no such order")
+            return 2
+        print(f"{o['side'].upper()} {o['qty']:g} {o['symbol']} ({o['venue']})  stop {o['stop_price']}  take profit {o['take_profit']}  status {o['status']}\nreason: {o['reason'] or '-'}")
+        if not args.yes:
+            if not sys.stdin.isatty():
+                print("refusing: approval needs an interactive terminal (or --yes in your own script)")
+                return 2
+            if input("type 'yes' to approve: ").strip().lower() != "yes":
+                print("not approved")
+                return 1
+        res = service.approve(args.order_id, broker=broker())
+        print(res["note"], f"| equity now {res['equity']:.2f}" if res.get("ok") else "")
+        return 0 if res["ok"] else 1
+    if args.cmd == "reject":
+        print(service.reject(args.order_id, args.reason)["note"])
+        return 0
+    if args.cmd == "orders":
+        for o in book.list_orders(args.limit, args.venue):
+            print(f"{o['order_id']}  {o['created_at']:%m-%d %H:%M}  {o['venue']:6} {o['side']:4} {o['symbol']:8} qty {o['qty'] or 0:<10g} {o['status']:17} {o['detail'] or ''}")
+        return 0
+    if args.cmd == "paper-tick":
+        print(service.tick(broker=broker()) or "no stops or take profits triggered")
+        return 0
+    if args.cmd == "kill":
+        print(service.kill(broker=broker()))
+        return 0
+    if args.cmd == "unkill":
+        print("kill switch cleared" if service.unkill() else "kill switch was not on")
+        return 0
+    if args.cmd == "unhalt":
+        print("drawdown halt cleared" if service.unhalt() else "no drawdown halt was latched")
+        return 0
+    # positions
+    st = service._state(broker(), ["BTCUSDT", "ETHUSDT"], book.utcnow())
+    r = book.realized_summary(args.venue)
+    lim, why = tl.load()
+    print(f"{args.venue} equity {st.equity:.2f} (start {book.start_equity():.2f}, peak {st.peak_equity:.2f})  cash {st.cash:.2f}  exposure {st.exposure:.2f} ({st.exposure / st.equity:.1%})")
+    print(f"realised {r['realized_pnl']:+.2f}  fees {r['fees_paid']:.2f}  fills {r['fills']}")
+    for p in st.positions.values():
+        px = st.prices.get(p.symbol, (p.avg_price,))[0]
+        print(f"  {p.symbol}: {p.qty:g} @ {p.avg_price:.2f}  now {px:.2f}  unrealised {(px - p.avg_price) * p.qty:+.2f}  stop {p.stop_price}  take profit {p.take_profit}")
+    print("limits:", f"{lim.profile} (exposure {lim.max_exposure_fraction:.0%}, drawdown halt {lim.account_drawdown_halt:.0%}, daily halt {lim.daily_loss_halt:.1%}), pinned" if lim else f"NOT USABLE: {why}")
+    print("KILL SWITCH ON" if st.killed else "kill switch off", "|", "DRAWDOWN HALT LATCHED" if st.halt_latched else "no drawdown halt")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     config.load_env()
     p = argparse.ArgumentParser(prog="getrich", description="Local-first research and trading system")
@@ -16,9 +93,10 @@ def main(argv: list[str] | None = None) -> int:
 
     b = sub.add_parser("collect-binance", help="fetch closed Binance klines (public REST, no key)")
     b.add_argument("--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT"])
-    b.add_argument("--timeframe", default="1d")
+    b.add_argument("--timeframe", nargs="+", default=["1d"], help="one or more, e.g. 1d 1h")
     b.add_argument("--start", default="2020-01-01", help="first date to fetch when a symbol has no data yet")
     sub.add_parser("collect-news", help="fetch central-bank RSS feeds into the store")
+    sub.add_parser("collect-webnews", help="fetch open web news headlines (GDELT and Google News RSS) by topic")
     sub.add_parser("watchdog", help="run all health checks once, raise or clear alerts")
     sub.add_parser("status", help="show the status screen")
     sub.add_parser("ingest-events", help="load the JSONL event log into DuckDB")
@@ -28,6 +106,35 @@ def main(argv: list[str] | None = None) -> int:
     a = sub.add_parser("ack", help="record that you confirmed something only you can check")
     a.add_argument("item")
     a.add_argument("--note", default="")
+    pr = sub.add_parser("propose", help="propose a PAPER order: runs the risk gate and prints its verdict. Nothing is submitted until you approve it")
+    pr.add_argument("side", choices=["buy", "sell"])
+    pr.add_argument("symbol", help="BTCUSDT or ETHUSDT")
+    pr.add_argument("--stop", type=float, help="stop price (required for a buy)")
+    pr.add_argument("--take-profit", type=float)
+    pr.add_argument("--qty", type=float, help="quantity; omit to size from the risk budget. The gate can only reduce it")
+    pr.add_argument("--risk", type=float, help="risk fraction of equity; can only lower the default 0.5%%")
+    pr.add_argument("--reason", default="")
+    pr.add_argument("--venue", choices=["paper", "testnet"], default="paper", help="paper = local simulator (default); testnet = Binance Spot Testnet, virtual money")
+    ap = sub.add_parser("approve", help="approve a proposed order (asks you to type yes; needs an interactive terminal)")
+    ap.add_argument("order_id")
+    ap.add_argument("--yes", action="store_true", help="skip the prompt (for your own scripts; never used by the agents)")
+    ap.add_argument("--venue", choices=["paper", "testnet"], default="paper", help="paper = local simulator (default); testnet = Binance Spot Testnet, virtual money")
+    rj = sub.add_parser("reject", help="reject a proposed order")
+    rj.add_argument("order_id")
+    rj.add_argument("--reason", default="")
+    ordp = sub.add_parser("orders", help="recent orders and their status")
+    ordp.add_argument("--limit", type=int, default=15)
+    ordp.add_argument("--venue", choices=["paper", "testnet"], default=None)
+    posp = sub.add_parser("positions", help="account: equity, open positions, realised result, halts")
+    posp.add_argument("--venue", choices=["paper", "testnet"], default="paper", help="paper = local simulator (default); testnet = Binance Spot Testnet, virtual money")
+    tk = sub.add_parser("paper-tick", help="check for triggered stops and take profits (stored bars for paper, the exchange for testnet); snapshot equity")
+    tk.add_argument("--venue", choices=["paper", "testnet"], default="paper", help="paper = local simulator (default); testnet = Binance Spot Testnet, virtual money")
+    kl = sub.add_parser("kill", help="KILL SWITCH: flatten every position on the venue and block new ones")
+    kl.add_argument("--venue", choices=["paper", "testnet"], default="paper", help="paper = local simulator (default); testnet = Binance Spot Testnet, virtual money")
+
+    sub.add_parser("unkill", help="clear the kill switch")
+    sub.add_parser("unhalt", help="clear the account drawdown halt after you have reviewed it")
+    sub.add_parser("limits-pin", help="pin the current config/limits.toml as the one the risk gate trusts")
     sub.add_parser("ledger-verify", help="verify the insight ledger's hash chain")
     sub.add_parser("validate-harness", help="prove the evaluation harness can tell skill from luck (synthetic controls)")
     sub.add_parser("run-baselines", help="run the baseline strategies on stored BTC/ETH data and print the report")
@@ -60,9 +167,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "collect-binance":
         from .collectors import binance
 
-        ok, summary = binance.collect(args.symbols, args.timeframe, args.start)
-        print(("OK " if ok else "FAILED ") + str(summary))
+        ok, summaries = True, {}
+        for tf in args.timeframe:
+            tf_ok, summaries[tf] = binance.collect(args.symbols, tf, args.start)
+            ok = ok and tf_ok
+        print(("OK " if ok else "FAILED ") + str(summaries if len(summaries) > 1 else summaries[args.timeframe[0]]))
         return 0 if ok else 1
+    if args.cmd in ("propose", "approve", "reject", "orders", "positions", "paper-tick", "kill", "unkill", "unhalt", "limits-pin"):
+        return _trading_command(args)
+    if args.cmd == "collect-webnews":
+        from .collectors import webnews
+
+        ok, summary = webnews.collect()
+        print(("OK " if ok else "PARTIAL ") + str(summary))
+        return 0
     if args.cmd == "collect-news":
         from .collectors import news
 
@@ -235,7 +353,10 @@ def main(argv: list[str] | None = None) -> int:
         emit("limits.approved", service="operator", profile=args.profile, sha256=hashlib.sha256(text.encode()).hexdigest(),
              max_exposure_fraction=p_["exposure_cap"], account_drawdown_halt=p_["proposed_account_drawdown_halt"],
              daily_loss_halt=p_["proposed_daily_loss_halt"], gap_fits_inside_halt=p_["gap_fits_inside_halt"])
-        print(f"approved profile '{args.profile}' -> {target}\n{text}")
+        from .trading import limits as trading_limits
+
+        pinned = trading_limits.pin()          # the approval is what pins the file the risk gate will trust
+        print(f"approved profile '{args.profile}' -> {target} (pinned {pinned[:12]})\n{text}")
         if not p_["gap_fits_inside_halt"]:
             print("note: at this profile a repeat of the worst historical 24-hour fall (x1.5) would exceed the drawdown halt")
         return 0

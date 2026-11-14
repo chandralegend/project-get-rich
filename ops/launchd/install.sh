@@ -9,7 +9,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd "$HERE/../.." && pwd)"
 AGENTS="$HOME/Library/LaunchAgents"
 UID_NUM="$(id -u)"
-LABELS=(com.getrich.caffeinate com.getrich.collect-binance com.getrich.collect-news com.getrich.watchdog)
+LABELS=(com.getrich.caffeinate com.getrich.collect-binance com.getrich.collect-news com.getrich.collect-webnews com.getrich.paper-tick com.getrich.watchdog)
 # The agent jobs call the Claude API, so they are installed separately, only once ANTHROPIC_API_KEY is in .env
 LABELS_AGENTS=(com.getrich.agents-extract com.getrich.agents-briefing com.getrich.agents-score)
 ACTION="${1:-preview}"

@@ -5,7 +5,7 @@
 <dict>
   <key>Label</key><string>com.getrich.agents-extract</string>
   <key>ProgramArguments</key>
-  <array><string>__PROJECT__/.venv/bin/getrich</string><string>agents-extract</string></array>
+  <array><string>__PROJECT__/.venv/bin/getrich</string><string>agents-extract</string><string>--limit</string><string>80</string></array>
   <key>WorkingDirectory</key><string>__PROJECT__</string>
   <key>StartInterval</key><integer>3600</integer>
   <key>StandardOutPath</key><string>__PROJECT__/data/logs/launchd-agents-extract.log</string>

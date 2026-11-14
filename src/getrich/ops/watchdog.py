@@ -20,13 +20,14 @@ import httpx
 from .. import config
 from ..obs.events import emit, iso, parse_ts, utcnow
 from ..obs.heartbeat import beat, read
+from ..obs.ingest import ingest_events
 from ..store.db import connect
 from ..llm import budget
 from ..store.ledger import verify_chain
 
 SERVICE = "watchdog"
 # Max seconds since the last SUCCESSFUL run before a service is considered stale (starting points).
-EXPECTED_MAX_AGE = {"collector.binance": 3 * 3600, "collector.news": 3 * 3600}
+EXPECTED_MAX_AGE = {"collector.binance": 3 * 3600, "collector.news": 3 * 3600, "collector.webnews": 4 * 3600}
 RENOTIFY_SECONDS = {"P0": 3600, "P1": 6 * 3600}
 DISK_P1_GIB, DISK_P0_GIB = 10.0, 5.0
 
@@ -93,6 +94,8 @@ def check(now=None) -> list[Alert]:
     except TimeoutError:
         pass  # the database is busy; the next run will check
 
+    alerts += _trading_alerts(now)
+
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if now >= day_start + timedelta(minutes=10):
         expected_latest = day_start - timedelta(days=1)
@@ -113,6 +116,42 @@ def check(now=None) -> list[Alert]:
                         "run `getrich collect-binance`; check Binance connectivity",
                     )
                 )
+    return alerts
+
+
+def _trading_alerts(now) -> list[Alert]:
+    """Order-path states that must never sit silently in a log. File flags are checked directly, so they clear the moment the owner clears them."""
+    from ..trading import book as tbook
+
+    alerts: list[Alert] = []
+    if tbook.is_halted():
+        alerts.append(Alert("risk_halt_latched", "P1", "the account drawdown halt is latched: new entries are blocked",
+                            "review the losses, then `getrich unhalt` only when you decide to resume"))
+    if tbook.is_killed():
+        alerts.append(Alert("kill_switch_on", "P1", "the kill switch is on: positions were flattened and new entries are blocked",
+                            "`getrich unkill` when you are ready"))
+    try:
+        with connect(timeout=5) as con:
+            ingest_events(con)
+            since = now - timedelta(hours=24)
+            names = dict(con.execute("SELECT event, count(*) FROM events WHERE event IN ('broker.unprotected_position', 'broker.stop_missing') AND ts >= ? GROUP BY 1", [since]).fetchall())
+    except TimeoutError:
+        names = {}
+    if names.get("broker.unprotected_position"):
+        alerts.append(Alert("unprotected_position", "P0", "a position may be held WITHOUT a protective stop (stop placement and flattening both failed)",
+                            "close it on the venue by hand now; see broker.unprotected_position in data/logs"))
+    if names.get("broker.stop_missing"):
+        alerts.append(Alert("stop_missing", "P0", "a held position has no resting protective order and no sale: its stop was removed",
+                            "check the venue and re-protect or close it; see broker.stop_missing in data/logs"))
+    try:                                # paper stops are evaluated from stored hourly bars, so a stale feed with a position open means no stop protection
+        st = tbook.load_state(["BTCUSDT"], now)
+        if st.positions:
+            age = st.prices.get("BTCUSDT", (0, 1e12, ""))
+            if age[2] != "1h" or age[1] > 3 * 3600:
+                alerts.append(Alert("paper_stops_blind", "P1", "a paper position is open but hourly bars are stale, so its stop is not being checked",
+                                    "run `getrich collect-binance --timeframe 1d 1h`"))
+    except TimeoutError:
+        pass
     return alerts
 
 
