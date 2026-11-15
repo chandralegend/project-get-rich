@@ -13,7 +13,7 @@ from .. import config
 from ..ids import new_id
 from ..obs.events import utcnow
 from ..store.db import connect
-from . import limits as L
+from . import instruments, limits as L
 from .types import FillInfo, PortfolioState, Position
 
 TF_SECONDS = {"1h": 3600, "1d": 86400}
@@ -63,12 +63,14 @@ def replay(fills: list[tuple], order_meta: dict[str, tuple], cash0: float) -> tu
     return cash, positions, realized, fees
 
 
-def latest_prices(con, symbols, now: datetime, venue: str = "binance") -> dict[str, tuple[float, float, str]]:
+def latest_prices(con, symbols, now: datetime, venue: str | None = None) -> dict[str, tuple[float, float, str]]:
+    """Newest closed bar per symbol. Each instrument's bars live under its own data venue (instruments.py) unless one is forced."""
     out = {}
     for sym in symbols:
+        venue_ = venue or instruments.bar_venue(sym)
         best = None
         for tf in ("1h", "1d"):
-            row = con.execute("SELECT ts_open, close FROM bars WHERE venue = ? AND symbol = ? AND timeframe = ? ORDER BY ts_open DESC LIMIT 1", [venue, sym, tf]).fetchone()
+            row = con.execute("SELECT ts_open, close FROM bars WHERE venue = ? AND symbol = ? AND timeframe = ? ORDER BY ts_open DESC LIMIT 1", [venue_, sym, tf]).fetchone()
             if row:
                 age = (now - row[0]).total_seconds() - TF_SECONDS[tf]          # time since that bar closed
                 if best is None or age < best[1]:

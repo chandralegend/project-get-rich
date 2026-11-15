@@ -26,9 +26,10 @@ from ..eval.data import load_bars
 from ..eval.labels import EPS
 from ..obs.events import emit, utcnow
 from ..store.db import connect
+from ..trading import instruments
 
 SERVICE = "agents.trader_scoring"
-SYMBOLS = {"BTC": "BTCUSDT", "ETH": "ETHUSDT"}
+LEGACY = {"BTC": "BTCUSDT", "ETH": "ETHUSDT"}      # the first plans named assets this way
 SCORED = ("open_long", "open_short")
 
 
@@ -68,6 +69,10 @@ def simulate(idea: dict, bars: pd.DataFrame, costs: CostModel | None = None) -> 
     return None
 
 
+def symbol_of(asset: str, payload: dict) -> str:
+    return payload.get("instrument") or LEGACY.get(asset, asset)
+
+
 def score_ideas(now=None) -> dict:
     """Resolve pending trade ideas. Bars are loaded with no database lock held; outcomes are written afterwards."""
     now = now or utcnow()
@@ -80,11 +85,12 @@ def score_ideas(now=None) -> dict:
     resolved = []
     for insight_id, asset, payload in rows:
         p = json.loads(payload)
-        if p.get("action") not in SCORED or asset not in SYMBOLS:
+        sym = symbol_of(asset, p)
+        if p.get("action") not in SCORED or instruments.get(sym) is None:
             continue
-        if asset not in bars:
-            bars[asset] = load_bars(SYMBOLS[asset], "1h")
-        res = simulate(p, bars[asset])
+        if sym not in bars:
+            bars[sym] = load_bars(sym, "1h", venue=instruments.bar_venue(sym))
+        res = simulate(p, bars[sym], instruments.cost_for(sym))
         if res is None:
             out["pending"] += 1
             continue
@@ -137,7 +143,7 @@ def journal(n: int = 8) -> dict:
     recent = []
     for as_of, asset, p, d, _ret in rows:
         p, d = json.loads(p), (json.loads(d) if d else None)
-        item = {"issued": f"{as_of:%Y-%m-%d %H:%M}", "asset": asset, "action": p.get("action"), "setup": p.get("setup"), "conviction": p.get("conviction"), "thesis": (p.get("thesis") or "")[:160]}
+        item = {"issued": f"{as_of:%Y-%m-%d %H:%M}", "instrument": symbol_of(asset, p), "action": p.get("action"), "setup": p.get("setup"), "conviction": p.get("conviction"), "thesis": (p.get("thesis") or "")[:160]}
         if p.get("action") in SCORED:
             item["outcome"] = {"r": round(d["r"], 2), "exit": d["kind"], "hours": d["bars"]} if d else "pending"
         recent.append(item)

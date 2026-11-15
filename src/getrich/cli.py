@@ -137,6 +137,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT"])
     b.add_argument("--timeframe", nargs="+", default=["1d"], help="one or more, e.g. 1d 1h")
     b.add_argument("--start", default="2020-01-01", help="first date to fetch when a symbol has no data yet")
+    fx = sub.add_parser("collect-fx", help="fetch closed forex, gold and silver bars from Yahoo Finance's public chart endpoint (paced; run by hand)")
+    fx.add_argument("--symbols", nargs="+", default=None, help="our symbols, e.g. EURUSD XAUUSD (default: all of them)")
+    fx.add_argument("--timeframe", nargs="+", default=["1d", "1h"], choices=["1d", "1h"])
     sub.add_parser("collect-news", help="fetch central-bank RSS feeds into the store")
     sub.add_parser("collect-webnews", help="fetch open web news headlines (GDELT and Google News RSS) by topic")
     sub.add_parser("watchdog", help="run all health checks once, raise or clear alerts")
@@ -256,6 +259,12 @@ def main(argv: list[str] | None = None) -> int:
     la.add_argument("--allow-short", action="store_true", help="allow short positions (margin venue only)")
     args = p.parse_args(argv)
 
+    if args.cmd == "collect-fx":
+        from .collectors import yahoo
+
+        ok, summary = yahoo.collect(args.symbols, args.timeframe, progress=lambda sym, tf, n: print(f"  {sym} {tf}: {'failed' if n is None else f'+{n} bars'}", flush=True))
+        print(("OK " if ok else "FAILED ") + str(sum(v for v in summary.values())) + " rows added")
+        return 0 if ok else 1
     if args.cmd == "collect-binance":
         from .collectors import binance
 

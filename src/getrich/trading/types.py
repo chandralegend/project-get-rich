@@ -15,11 +15,32 @@ class SymbolRules:
     tick: float          # PRICE_FILTER tickSize
     min_qty: float
     min_notional: float  # smallest order value in the quote currency
+    min_stop_fraction: float = 0.005   # stops tighter than this share of price are noise for this instrument
 
 
 DEFAULT_RULES = {
     "BTCUSDT": SymbolRules(step=1e-5, tick=0.01, min_qty=1e-5, min_notional=5.0),
     "ETHUSDT": SymbolRules(step=1e-4, tick=0.01, min_qty=1e-4, min_notional=5.0),
+    # More Binance spot pairs. ASSUMED filters for paper trading (the testnet adapter reads the real ones).
+    "SOLUSDT": SymbolRules(step=1e-3, tick=0.01, min_qty=1e-3, min_notional=5.0),
+    "BNBUSDT": SymbolRules(step=1e-3, tick=0.01, min_qty=1e-3, min_notional=5.0),
+    "XRPUSDT": SymbolRules(step=0.1, tick=1e-4, min_qty=0.1, min_notional=5.0),
+    "ADAUSDT": SymbolRules(step=0.1, tick=1e-4, min_qty=0.1, min_notional=5.0),
+    "DOGEUSDT": SymbolRules(step=1.0, tick=1e-5, min_qty=1.0, min_notional=5.0),
+    "LINKUSDT": SymbolRules(step=0.01, tick=0.001, min_qty=0.01, min_notional=5.0),
+    "AVAXUSDT": SymbolRules(step=0.01, tick=0.01, min_qty=0.01, min_notional=5.0),
+    "LTCUSDT": SymbolRules(step=1e-3, tick=0.01, min_qty=1e-3, min_notional=5.0),
+    # Forex and metals, quoted in US dollars. ASSUMED 1-unit granularity (OANDA-style); many cTrader brokers set 0.01 lot = 1,000 units as the minimum,
+    # which at a few hundred dollars would need leverage. Stops can be tighter than in crypto because the instruments move less.
+    "EURUSD": SymbolRules(step=1.0, tick=1e-5, min_qty=1.0, min_notional=1.0, min_stop_fraction=0.0015),
+    "GBPUSD": SymbolRules(step=1.0, tick=1e-5, min_qty=1.0, min_notional=1.0, min_stop_fraction=0.0015),
+    "AUDUSD": SymbolRules(step=1.0, tick=1e-5, min_qty=1.0, min_notional=1.0, min_stop_fraction=0.0015),
+    "NZDUSD": SymbolRules(step=1.0, tick=1e-5, min_qty=1.0, min_notional=1.0, min_stop_fraction=0.0015),
+    "JPYUSD": SymbolRules(step=1.0, tick=1e-7, min_qty=1.0, min_notional=1.0, min_stop_fraction=0.0015),
+    "CADUSD": SymbolRules(step=1.0, tick=1e-5, min_qty=1.0, min_notional=1.0, min_stop_fraction=0.0015),
+    "CHFUSD": SymbolRules(step=1.0, tick=1e-5, min_qty=1.0, min_notional=1.0, min_stop_fraction=0.0015),
+    "XAUUSD": SymbolRules(step=0.01, tick=0.01, min_qty=0.01, min_notional=1.0, min_stop_fraction=0.003),
+    "XAGUSD": SymbolRules(step=0.01, tick=0.001, min_qty=0.01, min_notional=1.0, min_stop_fraction=0.004),
 }
 
 

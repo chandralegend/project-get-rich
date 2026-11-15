@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 
 from ..eval.costs import CostModel
-from . import limits as L
+from . import instruments, limits as L
 from .types import DEFAULT_RULES, OrderIntent, PortfolioState, SymbolRules, Verdict
 
 FEE_RESERVE = 0.003        # keep cash for fees and slippage on the way in
@@ -26,7 +26,7 @@ def _floor_to(x: float, step: float) -> float:
 
 def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None, rules: dict[str, SymbolRules] | None = None,
              costs: CostModel | None = None) -> Verdict:
-    rules, costs = rules or DEFAULT_RULES, costs or CostModel()
+    rules, costs = rules or DEFAULT_RULES, costs or instruments.cost_for(intent.symbol)
     v = Verdict(approved=False)
 
     def check(name: str, ok: bool, detail: str) -> bool:
@@ -83,6 +83,9 @@ def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None
     if not check("one_position_per_symbol", pos is None, f"already holding {pos.qty if pos else 0} {intent.symbol}; adding to a position is not allowed"):
         return v
 
+    if not check("market_open", instruments.is_open(intent.symbol, state.now), f"the {intent.symbol} market is closed at {state.now:%a %H:%M} UTC"):
+        return v
+
     # price: a known, fresh bar. Stale prices mean a stale decision.
     if not check("price_known", px_info is not None, f"no stored bars for {intent.symbol}"):
         return v
@@ -98,8 +101,9 @@ def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None
     if not check("stop_beyond_price", (stop > price) if short else (stop < price), f"stop {stop} must be {'above' if short else 'below'} the current price {price}"):
         return v
     stop_frac = abs(price - stop) / price
-    if not check("stop_distance", L.MIN_STOP_FRACTION <= stop_frac <= L.MAX_STOP_FRACTION,
-                 f"stop is {stop_frac:.2%} from price; allowed range is {L.MIN_STOP_FRACTION:.1%} to {L.MAX_STOP_FRACTION:.0%}"):
+    min_stop = sym_rules.min_stop_fraction
+    if not check("stop_distance", min_stop <= stop_frac <= L.MAX_STOP_FRACTION,
+                 f"stop is {stop_frac:.2%} from price; allowed range for {intent.symbol} is {min_stop:.2%} to {L.MAX_STOP_FRACTION:.0%}"):
         return v
     if intent.take_profit is not None and not check("take_profit_on_the_right_side", (0 < intent.take_profit < price) if short else (intent.take_profit > price),
                                                     f"take profit must be {'below' if short else 'above'} the current price"):

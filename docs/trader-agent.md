@@ -10,7 +10,8 @@ Added 2026-11-15 at the owner's direction: the system should think like a succes
 
 | Input | Content |
 |---|---|
-| Market structure | Daily and hourly views for BTC and ETH: returns, realised volatility, ATR, range position, key levels (prior day, 24 h, 7 d, 30 d), volume vs average, EMA state, breakout and stretch facts; BTC/ETH correlation and relative strength. Closed bars only. |
+| The whole universe | One compact row per instrument (class, open now, data age, price, 24 h / 7 d / 20 d returns, the 24 h move in units of its own volatility, volatility, trend votes, drawdown, 7 d range position, stretch from the 48 h mean, round-trip cost, minimum stop) for 10 crypto pairs, 7 forex pairs, gold and silver. The agent compares them and picks; most get no idea. |
+| Market structure | Full detail for BTC and ETH, anything held, and the four non-core instruments that moved most for their own volatility. Daily and hourly views: returns, realised volatility, ATR, range position, key levels (prior day, 24 h, 7 d, 30 d), volume vs average, EMA state, breakout and stretch facts; BTC/ETH correlation and relative strength. Closed bars only. |
 | Signals and patterns | Facts about the current state (not recommendations), each family labelled with what our own pre-registered tests found (`SIGNAL_RECORD`): daily trend weak, forecasters noise, PI-Net no edge, news timing none, hourly breakout and reversion negative, shorts negative. |
 | Forecasts | Newest cached Chronos-2, Kronos and TimesFM probabilities of an up move (flagged if stale), as one weak input among many. |
 | News | Classified events from the last 24 h (suspicious items withheld), risk flags, the latest briefing, investigator findings, GDELT attention z-scores. It is told that no economic calendar is connected. |
@@ -19,7 +20,7 @@ Added 2026-11-15 at the owner's direction: the system should think like a succes
 
 ## What it can say
 
-At most one idea per asset: `open_long`, `hold`, `reduce`, `exit`, `wait` (and `open_short` as a hypothetical that is recorded and scored but cannot be traded; shorting is off in the approved limits and the paper path refuses it). Every open idea has a setup type, a conviction (0 to 1), a thesis, an invalidation, a stop distance, a target, a maximum holding time and a requested risk fraction. The gate can only shrink the size or refuse; a requested risk above the limit is cut to the limit. `wait` is a first-class answer and the prompt tells it to use it often.
+At most one idea per instrument (six in all), chosen from the whole universe, with `universe_view` saying what it looked at and why it passed on the rest: `open_long`, `hold`, `reduce`, `exit`, `wait` (and `open_short` as a hypothetical that is recorded and scored but cannot be traded; shorting is off in the approved limits and the paper path refuses it). Every open idea has a setup type, a conviction (0 to 1), a thesis, an invalidation, a stop distance, a target, a maximum holding time and a requested risk fraction. The gate can only shrink the size or refuse; a requested risk above the limit is cut to the limit. `wait` is a first-class answer and the prompt tells it to use it often.
 
 ## Safety
 
@@ -29,6 +30,10 @@ Everything from the internet reaches it only as structured fields written by ano
 
 No historical backtest: the model has read the history, so a backtest would measure memory. Ideas are scored forward and in shadow. Every `open_long` / `open_short` idea is resolved against the hourly bars after it was issued, with the same rules as the replay engine (entry at the close of the issue bar plus slippage and fee, stop, target, timeout, stop wins a tie, gaps fill at the worse open), giving a net return and R. `getrich trader-card` shows counts, win rate, average R, and results by setup and by conviction. Waiting is not scored, so selectivity is judged only through what it did take. Nothing about it earns trust until a pre-registered number of resolved ideas shows positive net R, which we should set before the first scored sample is large (suggested: 100 resolved ideas, average net R above 0.15, and no single setup carrying it).
 
+## Instruments (trading/instruments.py, docs/instruments.md)
+
+Crypto (Binance spot): BTC, ETH, SOL, BNB, XRP, ADA, DOGE, LINK, AVAX, LTC. Forex (Yahoo Finance): EURUSD, GBPUSD, AUDUSD, NZDUSD, plus JPYUSD, CADUSD and CHFUSD, which are 1 / USDJPY, 1 / USDCAD and 1 / USDCHF so every series is quoted in dollars (long JPYUSD = short USDJPY). Metals: gold and silver as CME futures proxies (GC=F, SI=F). Each instrument has its own exchange rules, assumed costs (forex spreads far below crypto fees), minimum stop, bar source and trading hours (forex and metals are closed from Friday 22:00 to Sunday 22:00 UTC; the gate refuses entries then, and ideas on a closed market are dropped before scoring).
+
 ## Not yet
 
-Amending a stop on an open position (advice only for now), shorts and leverage in the paper path, an economic calendar, scheduling (manual runs only), and acting on intraday news in real time. Cadence is the owner's call.
+Real execution on forex (no broker connected; everything is paper), swaps and rollover costs, intraday news in real time, and a refresh step inside `getrich trader` (run `collect-fx` and `collect-binance` first so data is fresh). Amending a stop on an open position (advice only for now), shorts and leverage in the paper path, an economic calendar, scheduling (manual runs only), and acting on intraday news in real time. Cadence is the owner's call.
