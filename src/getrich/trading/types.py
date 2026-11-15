@@ -27,7 +27,7 @@ DEFAULT_RULES = {
 class OrderIntent:
     """What someone (or later a model) wants to do. It is only a request: the risk gate decides what, if anything, may happen."""
     symbol: str
-    side: str                                   # "buy" or "sell" (spot: long only, so a sell can only reduce a position)
+    side: str                                   # "buy" / "sell" (spot, long only: a sell only reduces a long). Margin: "short" opens a short, "cover" reduces one.
     stop_price: float | None = None             # required for a buy
     take_profit: float | None = None
     qty: float | None = None                    # None: size from the risk budget. The gate may only reduce it, never raise it.
@@ -47,6 +47,7 @@ class Position:
     take_profit: float | None
     order_id: str
     entry_ts: datetime | None = None
+    side: str = "long"                          # "long" or "short"; qty is always positive
 
 
 @dataclass
@@ -80,10 +81,12 @@ class Verdict:
     reasons: list[str] = field(default_factory=list)       # why it was rejected or reduced
     checks: list[tuple[str, bool, str]] = field(default_factory=list)
     halted: bool = False
+    leverage_after: float = 0.0          # gross exposure over equity once this order fills
+    liq_distance: float = 0.0            # adverse move, as a fraction of price, that would liquidate the account (cross margin estimate)
 
     def to_dict(self) -> dict:
         return {"approved": self.approved, "qty": self.qty, "notional": round(self.notional, 2), "risk_amount": round(self.risk_amount, 4),
-                "risk_fraction": round(self.risk_fraction, 5), "reasons": self.reasons, "halted": self.halted,
+                "risk_fraction": round(self.risk_fraction, 5), "leverage_after": round(self.leverage_after, 3), "liq_distance": round(self.liq_distance, 4), "reasons": self.reasons, "halted": self.halted,
                 "checks": [{"check": n, "ok": ok, "detail": d} for n, ok, d in self.checks]}
 
 

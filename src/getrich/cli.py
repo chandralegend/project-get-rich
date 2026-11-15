@@ -188,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("file", nargs="?", default="docs/preregistration-news-forecast.md")
     rvt = sub.add_parser("replay-voltarget", help="replay the volatility-scaled trend strategy through the real gate and approved limits; writes docs/phase4-voltarget.md with --write")
     rvt.add_argument("--write", action="store_true")
+    rfs = sub.add_parser("replay-futures-study", help="run the PRE-REGISTERED hourly breakout study (long and short, leverage, funding, liquidation) through the real gate; writes docs/phase5-futures-breakout.md")
+    rfs.add_argument("--no-register", action="store_true", help="do not add the variants to the trial registry (dry run)")
     rvs = sub.add_parser("replay-voltarget-study", help="run the PRE-REGISTERED comparison of entering the gated vol-scaled strategy at 1 of 3 versus 2 of 3 votes; writes docs/phase4-voltarget-entry.md")
     rvs.add_argument("--no-register", action="store_true")
     ps = sub.add_parser("portfolio-study", help="run the PRE-REGISTERED wider-universe trend and momentum study; writes docs/portfolio-study.md")
@@ -239,6 +241,9 @@ def main(argv: list[str] | None = None) -> int:
     la.add_argument("--profile", required=True, choices=["minimal", "conservative", "moderate", "full"])
     la.add_argument("--replace", action="store_true", help="overwrite an existing config/limits.toml")
     la.add_argument("--risk-per-trade", type=float, default=None, help="fraction of equity at risk if a stop is hit, e.g. 0.02 for 2% (default 0.005, ceiling 0.05)")
+    la.add_argument("--max-leverage", type=float, default=None, help="cap on gross exposure over equity, 1 to 10 (default 1 = spot-equivalent); needs a margin venue, which only replay has so far")
+    la.add_argument("--max-exposure", type=float, default=None, help="gross exposure cap over equity; overrides the profile's value and may exceed 1 only up to --max-leverage")
+    la.add_argument("--allow-short", action="store_true", help="allow short positions (margin venue only)")
     args = p.parse_args(argv)
 
     if args.cmd == "collect-binance":
@@ -291,6 +296,15 @@ def main(argv: list[str] | None = None) -> int:
         print(text)
         (config.root() / "docs" / "phase4-voltarget-entry.md").write_text(text)
         print("wrote docs/phase4-voltarget-entry.md")
+        return 0
+    if args.cmd == "replay-futures-study":
+        from .trading import replay_futures
+
+        res = replay_futures.study(register=not args.no_register)
+        text = replay_futures.study_markdown(res)
+        print(text)
+        (config.root() / "docs" / "phase5-futures-breakout.md").write_text(text)
+        print("wrote docs/phase5-futures-breakout.md")
         return 0
     if args.cmd == "portfolio-study":
         from .eval import portfolio_study
@@ -502,7 +516,8 @@ def main(argv: list[str] | None = None) -> int:
         res = baseline_report.run()
         trend = res["returns"][[c for c in res["returns"].columns if c.endswith(":trend")]]
         derived = limits.derive(trend, limits.load_hourly(["BTCUSDT", "ETHUSDT"]))
-        text = limits.to_toml(derived, args.profile, approved=True, risk_per_trade=args.risk_per_trade)
+        text = limits.to_toml(derived, args.profile, approved=True, risk_per_trade=args.risk_per_trade, max_leverage=args.max_leverage,
+                              allow_short=args.allow_short, max_exposure_fraction=args.max_exposure)
         target.parent.mkdir(exist_ok=True)
         target.write_text(text)
         p_ = derived["profiles"][args.profile]

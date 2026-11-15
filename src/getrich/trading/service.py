@@ -52,6 +52,9 @@ def propose(intent: OrderIntent, *, broker: Broker | None = None, now=None) -> t
     state = _state(broker, _symbols(intent.symbol), now)
     lim, _why = L.load()
     verdict = gate.evaluate(intent, state, lim, rules=broker.symbol_rules())
+    if intent.side.lower() in ("short", "cover") and verdict.approved:        # the book and brokers here are spot only: fail closed rather than mis-account a short
+        verdict.approved, verdict.qty = False, 0.0
+        verdict.reasons.append("margin_venue: shorting is not wired into the paper or testnet path yet (replay only)")
     order_id = new_id("o")
     status = "proposed" if verdict.approved else "rejected_by_gate"
     ref = state.prices.get(intent.symbol, (None,))[0]

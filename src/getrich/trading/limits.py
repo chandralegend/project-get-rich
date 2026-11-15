@@ -20,6 +20,9 @@ MAX_COST_R = 0.25             # round-trip costs may not exceed a quarter of the
 EDGE_COST_MULTIPLE = 3.0      # if a source claims an expected move, it must beat round-trip costs by this multiple
 MIN_STOP_FRACTION = 0.005     # stops tighter than 0.5% of price are noise
 MAX_STOP_FRACTION = 0.20
+MAX_LEVERAGE = 10.0           # hard ceiling on gross exposure over equity that no file may exceed
+MAINTENANCE_MARGIN = 0.005    # ASSUMED: Binance USDT-M BTC/ETH small-size tier is about 0.4%; the account is liquidated when equity falls to this share of gross exposure
+LIQ_SAFETY = 0.5              # a stop must sit inside half of the distance to liquidation, so the stop fires long before the exchange would
 PROPOSAL_TTL_S = 15 * 60      # an unapproved proposal goes stale: prices move
 MIN_ORDER_LIFETIME_S = 60     # conduct guard: no cancelling an exchange order younger than this (spoofing-like behaviour)
 MAX_CANCEL_TO_FILL = 3.0      # conduct guard: cancels per fill over the last 24 hours
@@ -33,6 +36,8 @@ class Limits:
     daily_loss_halt: float
     sha256: str
     risk_per_trade: float = RISK_PER_TRADE
+    max_leverage: float = 1.0          # cap on gross exposure over equity; max_exposure_fraction may not exceed it. 1.0 = spot-equivalent
+    allow_short: bool = False          # shorting needs a margin venue; off unless the owner turns it on
 
 
 def limits_path() -> Path:
@@ -67,9 +72,11 @@ def load() -> tuple[Limits | None, str]:
         return None, "config/limits.toml changed since it was pinned (approve it again with limits-approve or limits-pin)"
     try:
         d = tomllib.loads(path.read_text())
-        lim = Limits(d["profile"], float(d["max_exposure_fraction"]), float(d["account_drawdown_halt"]), float(d["daily_loss_halt"]), h, float(d.get("risk_per_trade", RISK_PER_TRADE)))
+        lim = Limits(d["profile"], float(d["max_exposure_fraction"]), float(d["account_drawdown_halt"]), float(d["daily_loss_halt"]), h, float(d.get("risk_per_trade", RISK_PER_TRADE)),
+                     float(d.get("max_leverage", 1.0)), bool(d.get("allow_short", False)))
     except (KeyError, ValueError, tomllib.TOMLDecodeError) as exc:
         return None, f"config/limits.toml is not valid: {exc!r}"
-    if not (0 < lim.max_exposure_fraction <= 1 and 0 < lim.account_drawdown_halt < 1 and 0 < lim.daily_loss_halt < 1 and 0 < lim.risk_per_trade <= MAX_RISK_PER_TRADE):
+    if not (1 <= lim.max_leverage <= MAX_LEVERAGE and 0 < lim.max_exposure_fraction <= lim.max_leverage and 0 < lim.account_drawdown_halt < 1
+            and 0 < lim.daily_loss_halt < 1 and 0 < lim.risk_per_trade <= MAX_RISK_PER_TRADE):
         return None, "config/limits.toml has values outside their allowed range"
     return lim, ""

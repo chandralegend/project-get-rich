@@ -214,5 +214,23 @@
     "name": "voltarget-gate-v1:entry-2of3",
     "sharpe_annual": 0.9545,
     "source": "docs/phase4-voltarget-entry.md"
+  },
+  {
+    "phase": 4,
+    "name": "futures-breakout:F0",
+    "sharpe_annual": 0.8291,
+    "source": "docs/phase5-futures-breakout.md"
+  },
+  {
+    "phase": 4,
+    "name": "futures-breakout:F1",
+    "sharpe_annual": 0.4091,
+    "source": "docs/phase5-futures-breakout.md"
+  },
+  {
+    "phase": 4,
+    "name": "futures-breakout:F2",
+    "sharpe_annual": 0.3692,
+    "source": "docs/phase5-futures-breakout.md"
   }
 ]

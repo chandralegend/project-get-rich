@@ -4,7 +4,9 @@ It can tighten a request (smaller size, or no) but never loosen one: the approve
 for or what the risk budget allows. Exits that reduce a position are always allowed, including when halted or killed, so
 that nothing can trap the account in a position.
 
-Spot, long-only: a buy opens a position, a sell can only reduce one. One position per symbol.
+Spot, long-only by default: a buy opens a position, a sell can only reduce one. One position per symbol.
+Margin (off unless the pinned limits allow it): "short" opens a short and "cover" reduces one; gross exposure is capped at
+max_exposure_fraction (itself capped by max_leverage), and a stop must sit well inside the distance to liquidation.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None
         return ok
 
     side = intent.side.lower()
-    if side not in ("buy", "sell"):
+    if side not in ("buy", "sell", "short", "cover"):
         check("side", False, f"unknown side {intent.side!r}")
         return v
     if not check("symbol", intent.symbol in rules, f"{intent.symbol} is not tradable here (known: {sorted(rules)})"):
@@ -43,9 +45,11 @@ def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None
     px_info = state.prices.get(intent.symbol)
     pos = state.positions.get(intent.symbol)
 
-    # ---- exits: reduce-only, always allowed, never sized up
-    if side == "sell":
-        if not check("reduce_only", pos is not None and pos.qty > 0, "no open position to sell (spot is long-only)"):
+    # ---- exits: reduce-only, always allowed (even with shorting switched off), never sized up
+    if side in ("sell", "cover"):
+        want = "long" if side == "sell" else "short"
+        if not check("reduce_only", pos is not None and pos.qty > 0 and pos.side == want,
+                     f"no open {want} position to {side} ({'spot is long-only' if side == 'sell' else 'nothing to cover'})"):
             return v
         qty = pos.qty if intent.qty is None else min(intent.qty, pos.qty)
         qty = _floor_to(qty, sym_rules.step)
@@ -57,9 +61,12 @@ def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None
         return v
 
     # ---- entries
+    short = side == "short"
     if not check("kill_switch", not state.killed, "the kill switch is on: no new positions until `unkill`"):
         return v
     if not check("limits_pinned", state.limits_ok and limits is not None, state.limits_detail or "limits unavailable"):
+        return v
+    if short and not check("shorting_allowed", limits.allow_short, "the approved limits do not allow shorting (allow_short = false in config/limits.toml)"):
         return v
     if not check("halt_latch", not state.halt_latched, "the account drawdown halt tripped earlier and has not been reset: review, then run `getrich unhalt`"):
         v.halted = True
@@ -84,17 +91,18 @@ def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None
     if not check("price_fresh", age_s <= max_age, f"latest {tf} bar is {age_s / 3600:.1f}h old (limit {max_age / 3600:.0f}h): collector may be down"):
         return v
 
-    # stop
+    # stop (below the price for a long, above it for a short)
     stop = intent.stop_price
-    if not check("stop_required", stop is not None and stop > 0, "a buy needs a stop price"):
+    if not check("stop_required", stop is not None and stop > 0, f"a {'short' if short else 'buy'} needs a stop price"):
         return v
-    if not check("stop_below_price", stop < price, f"stop {stop} must be below the current price {price}"):
+    if not check("stop_beyond_price", (stop > price) if short else (stop < price), f"stop {stop} must be {'above' if short else 'below'} the current price {price}"):
         return v
-    stop_frac = (price - stop) / price
+    stop_frac = abs(price - stop) / price
     if not check("stop_distance", L.MIN_STOP_FRACTION <= stop_frac <= L.MAX_STOP_FRACTION,
-                 f"stop is {stop_frac:.2%} below price; allowed range is {L.MIN_STOP_FRACTION:.1%} to {L.MAX_STOP_FRACTION:.0%}"):
+                 f"stop is {stop_frac:.2%} from price; allowed range is {L.MIN_STOP_FRACTION:.1%} to {L.MAX_STOP_FRACTION:.0%}"):
         return v
-    if intent.take_profit is not None and not check("take_profit_above_price", intent.take_profit > price, "take profit must be above the current price"):
+    if intent.take_profit is not None and not check("take_profit_on_the_right_side", (0 < intent.take_profit < price) if short else (intent.take_profit > price),
+                                                    f"take profit must be {'below' if short else 'above'} the current price"):
         return v
 
     # cost gate
@@ -116,9 +124,15 @@ def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None
     # sizing: the smallest of every constraint, never above the request
     risk_frac = min(limits.risk_per_trade, intent.risk_fraction) if intent.risk_fraction else limits.risk_per_trade
     risk_budget = state.equity * risk_frac
-    caps = {"risk budget": risk_budget / (price - stop),
-            "exposure cap": (limits.max_exposure_fraction * state.equity - state.exposure) / price,
-            "cash": state.cash / (price * (1 + FEE_RESERVE))}
+    margin = short or limits.max_leverage > 1.0                  # a margin account funds positions from equity, a spot account from cash
+    caps = {"risk budget": risk_budget / abs(price - stop),
+            "exposure cap": (limits.max_exposure_fraction * state.equity - state.exposure) / price}
+    if margin:
+        free_margin = state.equity - state.exposure / limits.max_leverage
+        caps["margin"] = free_margin * limits.max_leverage / (price * (1 + FEE_RESERVE))
+        caps["liquidation buffer"] = (state.equity / (stop_frac / L.LIQ_SAFETY + L.MAINTENANCE_MARGIN) - state.exposure) / price
+    else:
+        caps["cash"] = state.cash / (price * (1 + FEE_RESERVE))
     if intent.qty is not None:
         caps["requested quantity"] = intent.qty
     binding = min(caps, key=caps.get)
@@ -134,6 +148,9 @@ def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None
         v.reasons.append(f"size reduced from {intent.qty:g} to {qty:g} by the {binding}")
 
     v.approved, v.qty, v.notional = True, qty, qty * price
-    v.risk_amount = qty * (price - stop)
+    v.risk_amount = qty * abs(price - stop)
     v.risk_fraction = v.risk_amount / state.equity if state.equity > 0 else 0.0
+    if state.equity > 0:
+        v.leverage_after = (state.exposure + qty * price) / state.equity
+        v.liq_distance = (1 / v.leverage_after - L.MAINTENANCE_MARGIN) if v.leverage_after > 0 else 0.0
     return v

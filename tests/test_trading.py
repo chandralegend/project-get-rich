@@ -362,3 +362,22 @@ def test_a_limits_file_carries_risk_per_trade_and_rejects_nonsense(tmp_path, mon
     L.pin()
     lim, why = L.load()
     assert lim is None and "outside their allowed range" in why
+
+
+def test_a_limits_file_carries_leverage_and_shorting_and_rejects_nonsense(tmp_path, monkeypatch):
+    monkeypatch.setattr(L, "limits_path", lambda: tmp_path / "limits.toml")
+    monkeypatch.setattr(L, "pin_path", lambda: tmp_path / "limits.pin")
+    body = 'profile = "aggressive"\naccount_drawdown_halt = 0.3\ndaily_loss_halt = 0.055\n'
+
+    def load(extra):
+        (tmp_path / "limits.toml").write_text(body + extra)
+        L.pin()
+        return L.load()
+
+    lim, why = load("max_exposure_fraction = 2.0\nmax_leverage = 3.0\nallow_short = true\n")
+    assert lim is not None and lim.max_leverage == 3.0 and lim.allow_short is True and lim.max_exposure_fraction == 2.0
+    lim, _ = load("max_exposure_fraction = 0.5\n")                                # an older file stays spot-only
+    assert lim.max_leverage == 1.0 and lim.allow_short is False
+    assert load("max_exposure_fraction = 2.0\n")[0] is None                        # exposure above 1x needs leverage that allows it
+    assert load("max_exposure_fraction = 4.0\nmax_leverage = 3.0\n")[0] is None   # exposure above the leverage cap
+    assert load("max_exposure_fraction = 2.0\nmax_leverage = 50.0\n")[0] is None   # above the hard ceiling
