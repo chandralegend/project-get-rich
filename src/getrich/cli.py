@@ -231,6 +231,12 @@ def main(argv: list[str] | None = None) -> int:
     ab = sub.add_parser("agents-briefing", help="write the daily briefing, risk flags and shadow views with Sonnet")
     ab.add_argument("--hours", type=int, default=24)
     ab.add_argument("--dry-run", action="store_true")
+    tr = sub.add_parser("trader", help="the trader agent: Claude reads the whole desk packet and writes a scored trade plan; --propose also creates gate-checked proposals for you to approve")
+    tr.add_argument("--dry-run", action="store_true", help="no API call: build the desk packet and show the estimated cost")
+    tr.add_argument("--propose", action="store_true", help="after the plan, send tradable ideas (open long, reduce, exit) to the risk gate as proposals; you still approve each one")
+    tr.add_argument("--show-packet", action="store_true", help="with --dry-run, print the full desk packet")
+    sub.add_parser("trader-score", help="resolve the trader agent's open ideas against the hourly bars that followed them")
+    sub.add_parser("trader-card", help="the trader agent's track record: ideas, results by setup and by conviction")
     inv = sub.add_parser("investigate", help="shadow-only research agent (Claude Agent SDK, locked down): web search and fetch plus read-only market tools")
     inv.add_argument("question")
     inv.add_argument("--max-usd", type=float, default=0.75, help="hard cost limit for this run")
@@ -432,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         res = baseline_report.run()
         print(baseline_report.to_markdown(res))
         return 0
-    if args.cmd in ("agents-extract", "agents-briefing") and not getattr(args, "dry_run", False):
+    if args.cmd in ("agents-extract", "agents-briefing", "trader") and not getattr(args, "dry_run", False):
         import os
 
         if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
@@ -453,6 +459,33 @@ def main(argv: list[str] | None = None) -> int:
         if res.get("path"):
             print(open(res["path"]).read())
         return 0 if res.get("status") in ("recorded", "dry_run") else 1
+    if args.cmd == "trader":
+        from .agents import trader
+
+        res = trader.run(dry_run=args.dry_run, propose=args.propose)
+        if res["status"] == "dry_run":
+            print(f"desk packet: {res['packet_chars']:,} characters, estimated worst-case cost ${res['estimated_cost_usd']:.3f}; scored {res['scored_now']}")
+            if args.show_packet:
+                print(json.dumps(res["packet"], indent=1, default=str))
+            return 0
+        summary = {k: v for k, v in res.items() if k not in ("packet", "idea_ids")}
+        print(summary)
+        if res.get("path"):
+            print(open(res["path"]).read())
+        return 0 if res["status"] == "recorded" else 1
+    if args.cmd == "trader-score":
+        from .agents import trader_scoring
+
+        print(trader_scoring.score_ideas())
+        return 0
+    if args.cmd == "trader-card":
+        from .agents import trader_scoring
+        from .store.db import connect
+
+        trader_scoring.score_ideas()
+        with connect() as con:
+            print(json.dumps(trader_scoring.scorecard(con), indent=1))
+        return 0
     if args.cmd == "agents-extract":
         from .agents import extract
 
