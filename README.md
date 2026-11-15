@@ -70,3 +70,14 @@ Secrets go in a gitignored `.env` file (see `getrich doctor` for the names), nev
 | Evaluation harness: costs, purged CV and CPCV, Deflated Sharpe, triple-barrier labels, backtest, trend and HAR baselines, limit derivation, PI-Net v1 models | `src/getrich/eval/`, [docs/phase1-findings.md](docs/phase1-findings.md), [docs/phase2-findings.md](docs/phase2-findings.md) |
 
 News rows keep two clocks, `published_at` (the source's claim) and `ingested_at` (ours). Backtests may only use `ingested_at`.
+
+
+## Running it (Docker) and the web UI
+
+```bash
+docker compose up -d --build     # whole system: web UI + API + scheduler
+open http://127.0.0.1:8420       # Desk, Trader, Markets, Orders & risk, News, Research, System
+scripts/gr status                # any CLI command against the live data volume
+```
+
+See docs/docker.md. Local frontend development: `cd frontend && npm install && npm run dev` (proxies /api to a locally served API: `uv run getrich serve`).

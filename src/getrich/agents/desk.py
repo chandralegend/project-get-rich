@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -221,18 +222,34 @@ def _movers(scan: dict[str, dict], n: int) -> list[str]:
     return [s for _m, s in sorted(cands, reverse=True)[:n]]
 
 
-def build_packet(now: datetime | None = None, journal: dict | None = None) -> dict:
-    """The packet. `journal` is supplied by the trader (its own recent calls and scores) so this module stays free of scoring imports."""
-    now = now or utcnow()
+def scan_universe(now: datetime, classes: tuple[str, ...] | None = None) -> tuple[dict, list[str], dict, dict]:
+    """(compact row per instrument, symbols with no data yet, daily frames, hourly frames) for the asset classes in scope."""
+    classes = tuple(classes) if classes else ("crypto", "fx", "metal")
     daily_frames, hourly_frames, scan, missing = {}, {}, {}, []
-    for inst in instruments.INSTRUMENTS:
+    for inst in (i for i in instruments.INSTRUMENTS if i.asset_class in classes):
         try:
             daily_frames[inst.symbol], hourly_frames[inst.symbol] = _bars(inst.symbol, "1d"), _bars(inst.symbol, "1h")
         except ValueError:
             missing.append(inst.symbol)                                 # no data yet: reported, never fatal
             continue
         scan[inst.symbol] = _scan_row(inst, daily_frames[inst.symbol], hourly_frames[inst.symbol], now)
-    held = [p.symbol for p in book.load_state(instruments.symbols(), now).positions.values()]
+    return scan, missing, daily_frames, hourly_frames
+
+
+def trader_classes() -> tuple[str, ...]:
+    """Which asset classes the trader may look at. GETRICH_TRADER_CLASSES (comma separated: crypto, fx, metal) narrows it; the default is everything."""
+    raw = os.environ.get("GETRICH_TRADER_CLASSES", "").strip()
+    wanted = tuple(c.strip() for c in raw.split(",") if c.strip())
+    return wanted or ("crypto", "fx", "metal")
+
+
+def build_packet(now: datetime | None = None, journal: dict | None = None, classes: tuple[str, ...] | None = None) -> dict:
+    """The packet. `journal` is supplied by the trader (its own recent calls and scores) so this module stays free of scoring imports.
+    `classes` limits the universe (for example just crypto for now); instruments outside it are not shown at all."""
+    now = now or utcnow()
+    classes = tuple(classes) if classes else trader_classes()
+    scan, missing, daily_frames, hourly_frames = scan_universe(now, classes)
+    held = [p.symbol for p in book.load_state(instruments.symbols(), now).positions.values() if p.symbol in scan]
     detail = list(dict.fromkeys([s for s in (i.symbol for i in instruments.INSTRUMENTS if i.core) if s in scan] + [s for s in held if s in scan] + _movers(scan, DETAIL_EXTRA)))
     markets = {}
     for s in detail:
@@ -251,7 +268,7 @@ def build_packet(now: datetime | None = None, journal: dict | None = None) -> di
         cross["dollar_vs_majors_5d"] = {"avg_return_of_the_majors_in_usd": _r(float(np.mean(r5))), "reading": "positive = the dollar weakened against the basket; negative = the dollar strengthened", "pairs": len(usd_pairs)}
     packet = {
         "as_of_utc": f"{now:%Y-%m-%d %H:%M}", "weekday": now.strftime("%A"), "session": session(now),
-        "universe": {"instruments": scan, "no_data_yet": missing, "how_to_read": "one compact row per instrument; full detail for the core pair, anything held and the biggest movers is in `markets`. You choose which instruments, if any, get an idea."},
+        "universe": {"in_scope_classes": list(classes), "instruments": scan, "no_data_yet": missing, "how_to_read": "one compact row per instrument; full detail for the core pair, anything held and the biggest movers is in `markets`. You choose which instruments, if any, get an idea."},
         "markets": markets, "cross_asset": cross, "news": _news_view(now), "signal_track_record": SIGNAL_RECORD, "portfolio": _portfolio_view(now),
         "journal": journal or {"note": "no previous trade ideas yet"},
     }

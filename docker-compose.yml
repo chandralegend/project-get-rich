@@ -1,0 +1,50 @@
+# The whole system in Docker: `docker compose up -d --build`, then open http://127.0.0.1:8420
+#   api        the web UI and API (published on localhost only, there is no login)
+#   scheduler  the jobs that launchd used to run: watchdog, paper tick, data refresh, news, Claude agents (never the trader, never orders)
+# Both share one named volume holding the database, logs and state. A named volume (not a host folder) is used on purpose: the database
+# lock needs real file locking, which bind mounts on macOS do not reliably give across containers.
+# The API key and other secrets come from the gitignored .env; nothing secret is baked into the image.
+
+x-getrich: &getrich
+  image: getrich:local
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    GETRICH_HOME: /app
+    GETRICH_DATA: /data
+    GETRICH_NOTIFY: "0"
+    GETRICH_TRADER_CLASSES: ${GETRICH_TRADER_CLASSES:-crypto}
+    TZ: ${TZ:-Asia/Colombo}
+  volumes:
+    - getrich-data:/data
+    - ./config:/app/config
+    - ./docs:/app/docs:ro
+    - ./research:/app/research:ro
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *getrich
+    container_name: getrich-api
+    command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8420:8000"
+  scheduler:
+    <<: *getrich
+    container_name: getrich-scheduler
+    command: ["scheduler"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,datetime,sys; h=json.load(open('/data/state/scheduler.json'))['heartbeat']; age=(datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(h.replace('Z','+00:00'))).total_seconds(); sys.exit(0 if age < 120 else 1)"]
+      interval: 30s
+      timeout: 8s
+      start_period: 60s
+      retries: 3
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  getrich-data:
+    name: getrich-data

@@ -140,6 +140,12 @@ def main(argv: list[str] | None = None) -> int:
     fx = sub.add_parser("collect-fx", help="fetch closed forex, gold and silver bars from Yahoo Finance's public chart endpoint (paced; run by hand)")
     fx.add_argument("--symbols", nargs="+", default=None, help="our symbols, e.g. EURUSD XAUUSD (default: all of them)")
     fx.add_argument("--timeframe", nargs="+", default=["1d", "1h"], choices=["1d", "1h"])
+    rd = sub.add_parser("refresh-data", help="bring market data up to date: Binance for crypto, Yahoo for forex and metals, one collector after another")
+    rd.add_argument("--classes", nargs="+", choices=["crypto", "fx", "metal"], default=None)
+    sv = sub.add_parser("serve", help="run the web UI and API (localhost only by default)")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8000)
+    sub.add_parser("scheduler", help="run the scheduled jobs (the launchd jobs, inside a container); blocks until interrupted")
     sub.add_parser("collect-news", help="fetch central-bank RSS feeds into the store")
     sub.add_parser("collect-webnews", help="fetch open web news headlines (GDELT and Google News RSS) by topic")
     sub.add_parser("watchdog", help="run all health checks once, raise or clear alerts")
@@ -237,6 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     tr = sub.add_parser("trader", help="the trader agent: Claude reads the whole desk packet and writes a scored trade plan; --propose also creates gate-checked proposals for you to approve")
     tr.add_argument("--dry-run", action="store_true", help="no API call: build the desk packet and show the estimated cost")
     tr.add_argument("--propose", action="store_true", help="after the plan, send tradable ideas (open long, reduce, exit) to the risk gate as proposals; you still approve each one")
+    tr.add_argument("--classes", nargs="+", choices=["crypto", "fx", "metal"], default=None, help="asset classes the trader may look at (default: GETRICH_TRADER_CLASSES, else all)")
     tr.add_argument("--show-packet", action="store_true", help="with --dry-run, print the full desk packet")
     sub.add_parser("trader-score", help="resolve the trader agent's open ideas against the hourly bars that followed them")
     sub.add_parser("trader-card", help="the trader agent's track record: ideas, results by setup and by conviction")
@@ -259,6 +266,22 @@ def main(argv: list[str] | None = None) -> int:
     la.add_argument("--allow-short", action="store_true", help="allow short positions (margin venue only)")
     args = p.parse_args(argv)
 
+    if args.cmd == "refresh-data":
+        from .ops import refresh
+
+        res = refresh.run(tuple(args.classes) if args.classes else None)
+        print(res)
+        return 0 if res["ok"] else 1
+    if args.cmd == "serve":
+        import uvicorn
+
+        uvicorn.run("getrich.api.app:app", host=args.host, port=args.port, log_level="info")
+        return 0
+    if args.cmd == "scheduler":
+        from .ops import scheduler
+
+        scheduler.run_forever()
+        return 0
     if args.cmd == "collect-fx":
         from .collectors import yahoo
 
@@ -471,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "trader":
         from .agents import trader
 
-        res = trader.run(dry_run=args.dry_run, propose=args.propose)
+        res = trader.run(dry_run=args.dry_run, propose=args.propose, classes=tuple(args.classes) if args.classes else None)
         if res["status"] == "dry_run":
             print(f"desk packet: {res['packet_chars']:,} characters, estimated worst-case cost ${res['estimated_cost_usd']:.3f}; scored {res['scored_now']}")
             if args.show_packet:

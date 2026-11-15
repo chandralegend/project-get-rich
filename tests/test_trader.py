@@ -377,3 +377,16 @@ def test_an_instrument_whose_hourly_feed_is_days_behind_is_unavailable_not_misle
     p = desk.build_packet(WED)
     assert p["universe"]["instruments"]["GBPUSD"]["available"] is False and "old" in p["universe"]["instruments"]["GBPUSD"]["why"]
     assert p["universe"]["instruments"]["EURUSD"]["available"] is True
+
+
+def test_the_trader_can_be_limited_to_one_asset_class(home, monkeypatch):
+    seed_all(WED)
+    only = desk.build_packet(WED, classes=("crypto",))
+    assert set(only["universe"]["instruments"]) == {"BTCUSDT", "ETHUSDT", "SOLUSDT"} and only["universe"]["in_scope_classes"] == ["crypto"]
+    assert "dollar_vs_majors_5d" not in only["cross_asset"]
+    monkeypatch.setenv("GETRICH_TRADER_CLASSES", "fx, metal")
+    assert desk.trader_classes() == ("fx", "metal")
+    both = desk.build_packet(WED)
+    assert set(both["universe"]["instruments"]) == {"EURUSD", "XAUUSD", "JPYUSD"}
+    monkeypatch.delenv("GETRICH_TRADER_CLASSES")
+    assert desk.trader_classes() == ("crypto", "fx", "metal")

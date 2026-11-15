@@ -13,6 +13,8 @@ dependencies = [
     "pandas>=2.2",
     "anthropic>=2.8.0",
     "claude-agent-sdk>=0.2.182",
+    "fastapi>=0.163.1",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]

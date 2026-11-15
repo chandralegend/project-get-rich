@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Run any getrich command inside the running Docker stack, against the live data volume:
+#   scripts/gr status        scripts/gr orders        scripts/gr trader --classes crypto        scripts/gr limits-approve --profile moderate --replace
+# (The `getrich` command on the host still works but reads the OLD host data/ folder, not the Docker volume.)
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+exec docker compose exec -T api getrich "$@"

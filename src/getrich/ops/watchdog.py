@@ -106,8 +106,11 @@ def check(now=None) -> list[Alert]:
                 ).fetchall()
         except TimeoutError:
             rows = []
+        from ..trading import instruments
+
+        tracked = set(instruments.symbols("crypto"))                      # only instruments we use: a delisted coin left in the store must not raise alerts forever
         for symbol, latest in rows:
-            if latest < expected_latest:
+            if symbol in tracked and latest < expected_latest:
                 alerts.append(
                     Alert(
                         f"bar_missing:{symbol}",

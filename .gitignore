@@ -10,3 +10,7 @@ data/
 # third-party model source checked out for review (forecast-fetch-code); never committed
 models/
 config/forecast_models.lock.json
+
+# frontend build output and dependencies
+frontend/node_modules/
+frontend/dist/

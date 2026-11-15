@@ -174,6 +174,8 @@ Separate process, deterministic, no network, limits in a hash-pinned read-only f
 
 ### 4.6 Operations on the Mac mini
 
+> **Update 2026-11-15:** the system now runs in Docker (api + scheduler containers, one named data volume) with a web UI on 127.0.0.1:8420; the launchd jobs were replaced by `getrich scheduler` inside the container, and only caffeinate stays on the host. See docs/docker.md. The text below describes the original launchd design.
+
 The agent reported this Mac is set to `sleep 1`, `autorestart 0` and auto-installs macOS updates [track 09]. Before any live trading:
 - disable sleep (`pmset`), enable auto-restart after power loss, disable automatic macOS restarts for updates;
 - run every process under `launchd` with restart-on-crash;
