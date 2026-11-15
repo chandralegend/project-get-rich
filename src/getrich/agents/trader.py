@@ -50,7 +50,8 @@ How to work, in this order:
 3. Signals and patterns. Look at levels, breakouts, pullbacks, ranges, stretched moves. Then read signal_track_record honestly: it tells you which inputs have earned trust in our own pre-registered tests and which have not. Most have not, and none was ever tested on forex or metals. Forecasts exist only for BTC and ETH and are noise on their own.
 4. Edge and costs. Each instrument shows its own round-trip cost and minimum stop. A trade needs a target worth well more than twice the costs and a stop at a level where the idea is simply wrong, not an arbitrary distance. If you cannot say what your edge is, wait. Say plainly when you have none.
 5. Size by conviction. risk_fraction is the share of equity you are willing to lose if the stop is hit; it can never exceed the limit in the packet (the gate enforces this and may reduce it, and the exposure cap often binds on low-volatility instruments). Scale it down when conviction is low or the setup is unproven.
-6. Review your own record (journal). If your recent calls lost, say what you would change; do not defend them.
+6. Check `freshness` before you trust anything: it gives the age in hours of the price data, the news (newest story, newest classified event, how many recent stories are not classified yet, the briefing) and what the pre-run refresh did, including any step that failed. Discount news that is old or incomplete and say so in `edge_check`; each event has `published_hours_ago`. Times in the packet are UTC. PI-Net is not an input (see `freshness.pinet`), and forecasts exist for BTC and ETH only.
+7. Review your own record (journal). If your recent calls lost, say what you would change; do not defend them.
 
 Rules for the output:
 - `instrument` must be a symbol from the universe. At most one idea per instrument and at most six ideas in all. Only include instruments you have a view on; in `universe_view` say in a few sentences what you looked at and why you passed on the rest.
@@ -237,11 +238,18 @@ def store_packet(packet: dict, now) -> str:
     return item_id
 
 
-def run(llm: ClaudeLLM | None = None, *, dry_run: bool = False, propose: bool = False, now=None, classes: tuple[str, ...] | None = None) -> dict:
+def run(llm: ClaudeLLM | None = None, *, dry_run: bool = False, propose: bool = False, now=None, classes: tuple[str, ...] | None = None, refresh: bool = False) -> dict:
+    """`refresh` brings market data and news up to date before the packet is built (ops/prepare.py). Off here so library callers and tests never touch the network
+    by surprise; the CLI (and so the web UI) turns it on for every real run."""
     llm = llm or ClaudeLLM()
+    prep = None
+    if refresh:
+        from ..ops import prepare
+
+        prep = prepare.run(classes)
     now = now or utcnow()
     scored = trader_scoring.score_ideas(now)                                # fresh outcomes before the agent reviews itself
-    packet = desk.build_packet(now, trader_scoring.journal(), classes)
+    packet = desk.build_packet(now, trader_scoring.journal(), classes, prep)
     avail = [s for s, r in packet["universe"]["instruments"].items() if r.get("available")]
     schema = plan_schema(avail)
     min_stops = {s: packet["universe"]["instruments"][s]["min_stop_pct"] / 100 for s in avail}

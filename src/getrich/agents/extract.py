@@ -17,7 +17,7 @@ from . import prefilter
 SERVICE = "agents.extract"
 MAX_OUTPUT_TOKENS = 500
 DEFAULT_LIMIT = 40
-DAILY_ITEM_CAP = 200
+DAILY_ITEM_CAP = 500          # about $0.35 a day at Haiku prices; the monthly budget cap is the real limit. 200 was reached by midday and froze the news
 
 SYSTEM = """You are a careful news classifier inside a personal crypto, gold and FX research tool.
 

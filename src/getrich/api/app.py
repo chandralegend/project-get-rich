@@ -38,6 +38,7 @@ def static_dir() -> Path | None:
 
 class TraderRun(BaseModel):
     classes: list[str] = Field(default_factory=lambda: ["crypto"])
+    refresh: bool = True                  # bring data and news up to date before planning
 
 
 class Refresh(BaseModel):
@@ -129,7 +130,7 @@ def create_app() -> FastAPI:
         if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
             raise HTTPException(400, "no Anthropic key in this environment (set it in the gitignored .env)")
         try:
-            return jobs.start("trader", ["--classes", *body.classes])          # shadow mode only: never --propose from here
+            return jobs.start("trader", ["--classes", *body.classes, *([] if body.refresh else ["--no-refresh"])])          # shadow mode only: never --propose from here
         except RuntimeError as exc:
             raise HTTPException(409, str(exc))
 

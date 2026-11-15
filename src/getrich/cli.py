@@ -245,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
     tr.add_argument("--propose", action="store_true", help="after the plan, send tradable ideas (open long, reduce, exit) to the risk gate as proposals; you still approve each one")
     tr.add_argument("--classes", nargs="+", choices=["crypto", "fx", "metal"], default=None, help="asset classes the trader may look at (default: GETRICH_TRADER_CLASSES, else all)")
     tr.add_argument("--show-packet", action="store_true", help="with --dry-run, print the full desk packet")
+    tr.add_argument("--no-refresh", action="store_true", help="skip the data and news refresh that a real run does first (a dry run never refreshes)")
+    tr.add_argument("--refresh", action="store_true", help="with --dry-run, refresh data and news first anyway")
     sub.add_parser("trader-score", help="resolve the trader agent's open ideas against the hourly bars that followed them")
     sub.add_parser("trader-card", help="the trader agent's track record: ideas, results by setup and by conviction")
     inv = sub.add_parser("investigate", help="shadow-only research agent (Claude Agent SDK, locked down): web search and fetch plus read-only market tools")
@@ -494,7 +496,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "trader":
         from .agents import trader
 
-        res = trader.run(dry_run=args.dry_run, propose=args.propose, classes=tuple(args.classes) if args.classes else None)
+        res = trader.run(dry_run=args.dry_run, propose=args.propose, classes=tuple(args.classes) if args.classes else None,
+                         refresh=args.refresh or (not args.dry_run and not args.no_refresh))
         if res["status"] == "dry_run":
             print(f"desk packet: {res['packet_chars']:,} characters, estimated worst-case cost ${res['estimated_cost_usd']:.3f}; scored {res['scored_now']}")
             if args.show_packet:

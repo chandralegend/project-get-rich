@@ -390,3 +390,83 @@ def test_the_trader_can_be_limited_to_one_asset_class(home, monkeypatch):
     assert set(both["universe"]["instruments"]) == {"EURUSD", "XAUUSD", "JPYUSD"}
     monkeypatch.delenv("GETRICH_TRADER_CLASSES")
     assert desk.trader_classes() == ("crypto", "fx", "metal")
+
+
+# ------------------------------------------------------------------ freshness and the pre-run refresh
+
+
+def test_the_packet_reports_how_old_each_input_is_and_labels_every_time_as_utc(home):
+    seed()
+    seed_event()
+    p = desk.build_packet(refresh={"steps": {"news_feeds": {"ok": False, "seconds": 1.0, "error": "feed down"}}})
+    f = p["freshness"]
+    assert f["news"]["newest_story_hours_ago"] is not None and f["news"]["stories_from_last_24h_not_yet_classified"] >= 0
+    assert f["market_data"]["hourly_bar_age_hours"]["oldest"] >= 0
+    assert "no live PI-Net output" in f["pinet"] and f["forecasters"]["covers"].startswith("BTCUSDT")
+    assert f["refresh_before_this_run"]["steps"]["news_feeds"]["ok"] is False
+    assert p["news"]["events_24h"][0]["published_hours_ago"] == pytest.approx(0.5, abs=0.1)
+    assert desk.build_packet()["freshness"]["refresh_before_this_run"] == {"ran": False}
+
+
+def test_stored_times_in_the_packet_are_converted_to_utc():
+    from datetime import timezone as tz
+    colombo = timezone(timedelta(hours=5, minutes=30))
+    assert desk._utc(datetime(2026, 11, 14, 23, 30, tzinfo=colombo)) == "2026-11-14 18:00"
+    assert desk._utc(datetime(2026, 11, 14, 18, 0, tzinfo=tz.utc)) == "2026-11-14 18:00"
+
+
+def test_one_failing_refresh_step_is_reported_and_does_not_stop_the_others(home, monkeypatch):
+    from getrich.ops import prepare, refresh
+    from getrich.collectors import news, webnews
+    from getrich.agents import extract as ex, briefing as br
+
+    monkeypatch.setattr(refresh, "run", lambda classes=None: {"ok": True, "rows_added": {"binance/1h": 3}})
+    monkeypatch.setattr(news, "collect", lambda: (_ for _ in ()).throw(RuntimeError("feed down")))
+    monkeypatch.setattr(webnews, "collect", lambda: (True, {"gnews": 5}))
+    monkeypatch.setattr(ex, "extract_pending", lambda limit=60: {"considered": 5, "recorded": 4, "failed": 0, "stopped": None})
+    monkeypatch.setattr(br, "run", lambda: {"recorded": 3})
+    out = prepare.run(("crypto",))["steps"]
+    assert out["news_feeds"]["ok"] is False and "feed down" in out["news_feeds"]["error"]
+    assert out["market_data"]["ok"] and out["web_news"]["ok"] and out["classify_news"]["detail"]["recorded"] == 4
+    assert out["briefing"]["ok"]                                                   # no briefing existed, so one was written
+
+
+def test_a_recent_briefing_is_not_rewritten(home, monkeypatch):
+    from getrich.ops import prepare
+    from getrich.agents import briefing as br
+
+    seed_event("n_b")
+    with connect() as con:
+        record_insight(con, asset="MARKET", evidence=["n_b"], model="m", as_of=utcnow(), payload={"kind": "briefing", "headline": "h", "summary": "s", "regime": "calm"})
+    monkeypatch.setattr(br, "run", lambda: pytest.fail("a fresh briefing must not trigger another model call"))
+    from getrich.ops import refresh
+    from getrich.collectors import news, webnews
+    from getrich.agents import extract as ex
+    monkeypatch.setattr(refresh, "run", lambda classes=None: {"ok": True, "rows_added": {}})
+    monkeypatch.setattr(news, "collect", lambda: (True, {}))
+    monkeypatch.setattr(webnews, "collect", lambda: (True, {}))
+    monkeypatch.setattr(ex, "extract_pending", lambda limit=60: {})
+    steps = prepare.run(("crypto",))["steps"]
+    assert "skipped" in steps["briefing"]["detail"]
+
+
+def test_a_real_run_refreshes_first_and_a_dry_run_does_not(home, monkeypatch):
+    from getrich.ops import prepare
+
+    seed()
+    calls = []
+    monkeypatch.setattr(prepare, "run", lambda classes=None: calls.append(classes) or {"ran_at": "t", "steps": {}})
+    trader.run(ClaudeLLM(FakeSDK()), dry_run=True)
+    assert calls == []
+    out, _ = run(plan(), refresh=True)
+    assert calls == [None] and out["status"] == "recorded"
+    run(plan(), refresh=False)
+    assert calls == [None]
+
+
+def test_a_story_dated_in_the_future_does_not_make_the_news_look_fresher_than_it_is(home):
+    seed()
+    with connect() as con:
+        con.execute("INSERT INTO news_items VALUES (?,?,?,?,?,?,?,?)", ["n_fut", "kraken.status", "https://x", "Scheduled maintenance", "", utcnow() + timedelta(days=6), utcnow(), "fh"])
+        con.execute("INSERT INTO news_items VALUES (?,?,?,?,?,?,?,?)", ["n_old", "gnews", "https://x", "Older story", "", utcnow() - timedelta(hours=5), utcnow(), "oh"])
+    assert desk.news_freshness(utcnow())["newest_story_hours_ago"] == pytest.approx(5.0, abs=0.1)

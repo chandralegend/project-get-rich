@@ -37,3 +37,21 @@ Crypto (Binance spot): BTC, ETH, SOL, BNB, XRP, ADA, DOGE, LINK, AVAX, LTC. Fore
 ## Not yet
 
 Real execution on forex (no broker connected; everything is paper), swaps and rollover costs, intraday news in real time, and a refresh step inside `getrich trader` (run `collect-fx` and `collect-binance` first so data is fresh). Amending a stop on an open position (advice only for now), shorts and leverage in the paper path, an economic calendar, scheduling (manual runs only), and acting on intraday news in real time. Cadence is the owner's call.
+
+
+## Fresh inputs (2026-11-16)
+
+A plan made on stale headlines is worse than none, so a real trader run (CLI or UI) first calls `ops/prepare.py`, one step after another, each allowed to fail alone:
+
+1. market data for the classes in scope (Binance for crypto, Yahoo for forex and metals),
+2. the central-bank feeds and the open-web news,
+3. classification of the newest 60 unclassified stories (Haiku, newest first),
+4. a new briefing if the last one is older than 8 hours (one Sonnet call, a few cents).
+
+What happened, and how old each input is afterwards, goes into the packet's `freshness` section, and the system prompt tells the trader to discount stale or incomplete news and to say so in `edge_check`. `--no-refresh` (CLI) or the tick-box on the Trader screen skips it. A dry run never refreshes unless `--refresh` is given.
+
+Why this was added: the hourly classification job stopped at a daily cap of 200 items by midday UTC and worked oldest first, so fresh headlines queued behind a backlog and the packet's "news" was up to a day old. The cap is now 500 (about $0.35 a day at Haiku prices; the monthly budget cap is the real limit) and the queue is newest first.
+
+Also fixed in the same change: times inside the packet (briefing, flags, findings, journal) were the container's local time (Asia/Colombo) under a UTC heading; they are UTC now, and every event carries `published_hours_ago`.
+
+Not refreshed by a run, on purpose: the forecasters (Kronos, Chronos-2, TimesFM) and the PI-Net. They need torch and model weights, which the Docker image leaves out. The forecast caches are walk-forward results for BTC and ETH made on the host, and each forecast in the packet shows its origin date. There is no live PI-Net output; the models were research, found no edge, and the packet says so.

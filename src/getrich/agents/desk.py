@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -29,6 +29,13 @@ from ..store.db import connect
 from ..trading import book, instruments, limits as L
 from ..trading.types import DEFAULT_RULES
 from . import briefing
+
+def _utc(ts) -> str:
+    """A stored timestamp as UTC text. The store hands back the container's local time (Asia/Colombo here); the packet says UTC everywhere."""
+    if getattr(ts, "tzinfo", None) is not None:
+        ts = ts.astimezone(timezone.utc)
+    return f"{ts:%Y-%m-%d %H:%M}"
+
 
 HOURLY_MIN_BARS = 24 * 8
 DETAIL_EXTRA = 4                       # non-core, non-held instruments shown in full: the biggest moves in volatility terms
@@ -159,6 +166,20 @@ def _scan_row(inst: instruments.Instrument, daily: pd.DataFrame, hourly: pd.Data
     }
 
 
+def _with_ages(events: list[dict], now: datetime) -> list[dict]:
+    """Each event gets `published_hours_ago` (when the story came out, not when it was classified), so the trader can tell breaking news from old news."""
+    if not events:
+        return events
+    with connect() as con:
+        marks = ",".join("?" for _ in events)
+        pub = dict(con.execute(f"SELECT item_id, coalesce(published_at, ingested_at) FROM news_items WHERE item_id IN ({marks})", [e["ref"] for e in events]).fetchall())
+    out = []
+    for e in events:
+        t = pub.get(e["ref"])
+        out.append({**e, "published_hours_ago": round(max((now - t).total_seconds() / 3600, 0.0), 1) if t is not None else None})
+    return out
+
+
 def _news_view(now: datetime) -> dict:
     with connect() as con:
         events, withheld = briefing.gather_events(con, 24)
@@ -168,17 +189,18 @@ def _news_view(now: datetime) -> dict:
         brief = con.execute("SELECT as_of, payload FROM insights WHERE json_extract_string(payload, '$.kind') = 'briefing' ORDER BY seq DESC LIMIT 1").fetchone()
         inv = con.execute("SELECT as_of, evidence, payload FROM insights WHERE json_extract_string(payload, '$.kind') = 'investigation_finding' AND epoch(as_of) >= ? ORDER BY seq DESC LIMIT 8",
                           [(now - timedelta(hours=72)).timestamp()]).fetchall()
+    events = _with_ages(events[:25], now)
     out = {
-        "events_24h": events[:25], "withheld_as_suspicious": withheld,
-        "risk_flags_48h": [{"as_of": f"{a:%Y-%m-%d %H:%M}", "asset": asset, **{k: json.loads(p)[k] for k in ("flag", "severity", "reason") if k in json.loads(p)}} for a, asset, p in flags],
+        "events_24h": events, "withheld_as_suspicious": withheld,
+        "risk_flags_48h": [{"as_of": _utc(a), "asset": asset, **{k: json.loads(p)[k] for k in ("flag", "severity", "reason") if k in json.loads(p)}} for a, asset, p in flags],
         "calendar": "no economic calendar source is connected: scheduled releases (CPI, FOMC, ECB, BoJ, payrolls, ETF decisions) are NOT visible here, so check the date yourself and widen caution on likely event days. Forex and gold react most to exactly these releases.",
         "note": "event assets use currency and asset tags (USD, EUR, JPY, GOLD, BTC...); map them to the instruments yourself",
     }
     if brief:
         p = json.loads(brief[1])
-        out["latest_briefing"] = {"as_of": f"{brief[0]:%Y-%m-%d %H:%M}", "headline": p["headline"], "regime": p["regime"], "summary": p["summary"][:700]}
+        out["latest_briefing"] = {"as_of": _utc(brief[0]), "headline": p["headline"], "regime": p["regime"], "summary": p["summary"][:700]}
     if inv:
-        out["investigator_findings_72h"] = [{"as_of": f"{a:%Y-%m-%d %H:%M}", **{k: json.loads(p).get(k) for k in ("claim", "direction", "confidence")}} for a, _e, p in inv]
+        out["investigator_findings_72h"] = [{"as_of": _utc(a), **{k: json.loads(p).get(k) for k in ("claim", "direction", "confidence")}} for a, _e, p in inv]
     try:
         from ..news import gdelt_timeline as g
 
@@ -190,6 +212,36 @@ def _news_view(now: datetime) -> dict:
     except Exception:
         pass
     return out
+
+
+def _age_h(ts, now: datetime) -> float | None:
+    return None if ts is None else round((now - ts).total_seconds() / 3600, 1)
+
+
+def news_freshness(now: datetime) -> dict:
+    """How old the news inputs are, in hours: the newest story, the newest classified event, the unclassified backlog and the briefing."""
+    with connect() as con:
+        newest_item = con.execute("SELECT max(coalesce(published_at, ingested_at)) FROM news_items WHERE source NOT IN ('desk_packet', 'investigator_evidence') "
+                                  "AND coalesce(published_at, ingested_at) <= ?", [now]).fetchone()[0]          # exchange maintenance notices are dated in the future
+        newest_event = con.execute("SELECT max(as_of) FROM insights WHERE json_extract_string(payload, '$.kind') = 'event_extraction'").fetchone()[0]
+        backlog = con.execute("SELECT count(*) FROM news_items n LEFT JOIN item_processing p ON p.item_id = n.item_id WHERE p.item_id IS NULL AND n.ingested_at >= ?",
+                              [now - timedelta(hours=24)]).fetchone()[0]
+        briefing_ts = con.execute("SELECT max(as_of) FROM insights WHERE json_extract_string(payload, '$.kind') = 'briefing'").fetchone()[0]
+    return {"newest_story_hours_ago": _age_h(newest_item, now), "newest_classified_event_hours_ago": _age_h(newest_event, now),
+            "stories_from_last_24h_not_yet_classified": backlog, "briefing_hours_old": _age_h(briefing_ts, now)}
+
+
+def _freshness(now: datetime, scan: dict, refresh: dict | None) -> dict:
+    """How old every input is, in plain hours, and what the pre-run refresh managed to do. The trader is told to discount what is stale."""
+    ages = [r["data_age_hours"] for r in scan.values() if r.get("available") and r.get("data_age_hours") is not None]
+    return {
+        "market_data": {"hourly_bar_age_hours": {"newest": min(ages), "oldest": max(ages)} if ages else None},
+        "news": news_freshness(now),
+        "forecasters": {"covers": "BTCUSDT and ETHUSDT only", "refreshed_by_this_run": False,
+                        "note": "walk-forward caches from the research environment; each forecast shows its own origin date and a stale flag"},
+        "pinet": "no live PI-Net output exists. The models were trained as research, found no edge in any pre-registered test and need the host ML environment, so it is not an input",
+        "refresh_before_this_run": refresh if refresh is not None else {"ran": False},
+    }
 
 
 def _portfolio_view(now: datetime) -> dict:
@@ -243,7 +295,7 @@ def trader_classes() -> tuple[str, ...]:
     return wanted or ("crypto", "fx", "metal")
 
 
-def build_packet(now: datetime | None = None, journal: dict | None = None, classes: tuple[str, ...] | None = None) -> dict:
+def build_packet(now: datetime | None = None, journal: dict | None = None, classes: tuple[str, ...] | None = None, refresh: dict | None = None) -> dict:
     """The packet. `journal` is supplied by the trader (its own recent calls and scores) so this module stays free of scoring imports.
     `classes` limits the universe (for example just crypto for now); instruments outside it are not shown at all."""
     now = now or utcnow()
@@ -269,7 +321,7 @@ def build_packet(now: datetime | None = None, journal: dict | None = None, class
     packet = {
         "as_of_utc": f"{now:%Y-%m-%d %H:%M}", "weekday": now.strftime("%A"), "session": session(now),
         "universe": {"in_scope_classes": list(classes), "instruments": scan, "no_data_yet": missing, "how_to_read": "one compact row per instrument; full detail for the core pair, anything held and the biggest movers is in `markets`. You choose which instruments, if any, get an idea."},
-        "markets": markets, "cross_asset": cross, "news": _news_view(now), "signal_track_record": SIGNAL_RECORD, "portfolio": _portfolio_view(now),
+        "freshness": _freshness(now, scan, refresh), "markets": markets, "cross_asset": cross, "news": _news_view(now), "signal_track_record": SIGNAL_RECORD, "portfolio": _portfolio_view(now),
         "journal": journal or {"note": "no previous trade ideas yet"},
     }
     return packet

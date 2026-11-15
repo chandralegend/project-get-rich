@@ -8,6 +8,7 @@ const actionTone = (a: string) => (a === "open_long" ? "up" : a === "open_short"
 
 function RunPanel({ onFinished }: { onFinished: () => void }) {
   const [classes, setClasses] = useState<string[]>(["crypto"]);
+  const [refresh, setRefresh] = useState(true);
   const [jobId, setJobId] = useState<string | null>(null);
   const jobs = useApi("/api/jobs", 4000);
   const running = (jobs.data?.jobs ?? []).find((j: Json) => j.kind === "trader" && j.status === "running");
@@ -17,15 +18,16 @@ function RunPanel({ onFinished }: { onFinished: () => void }) {
   useEffect(() => { if (status === "done") onFinished(); }, [status]);
 
   return (
-    <Card title="Run the trader" right={<span className="note">about $0.05 per run, manual only</span>}>
+    <Card title="Run the trader" right={<span className="note">about $0.05–0.10 per run, manual only</span>}>
       <div className="row">
         {CLASSES.map(([id, label]) => (
           <button key={id} className={`chip ${classes.includes(id) ? "on" : ""}`} onClick={() => setClasses((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]))}>{label}</button>
         ))}
         <span className="sp" />
-        <ActionButton className="btn primary" label={running ? "Running…" : "Run trader"} disabled={!!running || classes.length === 0} run={() => post("/api/trader/run", { classes })} onDone={(m) => setJobId(m.id)} />
+        <ActionButton className="btn primary" label={running ? "Running…" : "Run trader"} disabled={!!running || classes.length === 0} run={() => post("/api/trader/run", { classes, refresh })} onDone={(m) => setJobId(m.id)} />
       </div>
-      <div className="note" style={{ marginTop: 8 }}>Shadow mode: it reads the whole desk, writes a plan and checks each idea against the risk gate. Nothing becomes an order until you press <b>Propose to gate</b> on an idea and then approve it on Orders &amp; risk. Refresh market data on the System screen first if it is stale.</div>
+      <label className="row note" style={{ marginTop: 8, gap: 6 }}><input type="checkbox" checked={refresh} onChange={(e) => setRefresh(e.target.checked)} />Fetch the latest prices and news first, and classify the news (adds about a minute or two; untick to plan on what is already stored)</label>
+      <div className="note" style={{ marginTop: 8 }}>Shadow mode: it reads the whole desk, writes a plan and checks each idea against the risk gate. Nothing becomes an order until you press <b>Propose to gate</b> on an idea and then approve it on Orders &amp; risk. </div>
       {job.data && (
         <div style={{ marginTop: 10 }}>
           <div className="row"><Pill tone={status === "done" ? "up" : status === "running" ? "ac" : "dn"}>{status}</Pill><span className="note">started {fmt.ago(job.data.started)}</span></div>
@@ -33,6 +35,52 @@ function RunPanel({ onFinished }: { onFinished: () => void }) {
           {status === "failed" && <div className="dn" style={{ marginTop: 6 }}>The run failed. The log above says why (a missing key, a budget cap, or stale data are the usual reasons).</div>}
         </div>
       )}
+    </Card>
+  );
+}
+
+
+const hrs = (h: number | null | undefined) => (h == null ? "–" : h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${h.toFixed(1)} h` : `${(h / 24).toFixed(1)} days`);
+const staleTone = (h: number | null | undefined, limit: number) => (h == null ? "" : h > limit ? "dn" : "up");
+
+function Inputs({ pref }: { pref: string }) {
+  const q = useApi(`/api/trader/packet/${pref}`, 0);
+  if (q.error) return <Card title="Inputs it was given"><div className="note">The stored packet could not be loaded.</div></Card>;
+  if (!q.data) return <Card title="Inputs it was given"><Loading error={q.error} /></Card>;
+  const pk = q.data.packet, f = pk.freshness;
+  const fc = Object.entries(pk.markets ?? {}).filter(([, m]: [string, any]) => m.forecasts && Object.keys(m.forecasts).length);
+  const steps: [string, Json][] = Object.entries(f?.refresh_before_this_run?.steps ?? {});
+  return (
+    <Card title="Inputs it was given" right={<span className="note">as of {pk.as_of_utc} UTC</span>}>
+      {!f ? <div className="note">This plan was made before freshness was recorded.</div> : (
+        <table><tbody>
+          <tr><td className="mu">Prices (hourly bar age)</td><td className={`r num ${staleTone(f.market_data?.hourly_bar_age_hours?.oldest, 3)}`}>{f.market_data?.hourly_bar_age_hours ? `${hrs(f.market_data.hourly_bar_age_hours.newest)} – ${hrs(f.market_data.hourly_bar_age_hours.oldest)}` : "–"}</td></tr>
+          <tr><td className="mu">Newest story</td><td className={`r num ${staleTone(f.news?.newest_story_hours_ago, 3)}`}>{hrs(f.news?.newest_story_hours_ago)} ago</td></tr>
+          <tr><td className="mu">Newest classified event</td><td className={`r num ${staleTone(f.news?.newest_classified_event_hours_ago, 3)}`}>{hrs(f.news?.newest_classified_event_hours_ago)} ago</td></tr>
+          <tr><td className="mu">Recent stories not yet classified</td><td className={`r num ${f.news?.stories_from_last_24h_not_yet_classified > 20 ? "dn" : ""}`}>{f.news?.stories_from_last_24h_not_yet_classified}</td></tr>
+          <tr><td className="mu">Briefing</td><td className={`r num ${staleTone(f.news?.briefing_hours_old, 12)}`}>{hrs(f.news?.briefing_hours_old)} old</td></tr>
+        </tbody></table>
+      )}
+      {steps.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div className="note"><b>Refresh before this run</b></div>
+          {steps.map(([k, v]) => <div key={k} className="note"><span className={v.ok ? "up" : "dn"}>{v.ok ? "ok" : "failed"}</span> {k.replace(/_/g, " ")} · {v.seconds}s{v.error ? ` · ${v.error}` : ""}</div>)}
+        </div>
+      )}
+      {f && !f.refresh_before_this_run?.steps && <div className="note" style={{ marginTop: 6 }}>No refresh ran before this plan; it used what was stored.</div>}
+      <div style={{ marginTop: 10 }}>
+        <div className="note"><b>Forecasters</b> (BTC and ETH only; they did not beat a random walk)</div>
+        {fc.length === 0 ? <div className="note">No forecasts in this plan.</div> : fc.map(([sym, m]: [string, any]) => (
+          <div key={sym} style={{ marginTop: 4 }}>
+            <div className="note"><b>{sym}</b></div>
+            <table><tbody>{Object.entries(m.forecasts).map(([name, v]: [string, any]) => (
+              <tr key={name}><td className="mu">{name}</td><td className="r num">{v.prob_up ? Object.entries(v.prob_up).map(([h, p]) => `${h} ${Math.round((p as number) * 100)}%`).join(" · ") : v.note ?? v.error}{v.stale ? " (stale)" : ""}<span className="mu"> · origin {v.origin}</span></td></tr>
+            ))}</tbody></table>
+          </div>
+        ))}
+        <div className="note" style={{ marginTop: 6 }}>Probability of an up move. These caches come from the research environment and are not refreshed by a run.</div>
+      </div>
+      <div className="note" style={{ marginTop: 8 }}><b>PI-Net:</b> {f?.pinet ?? "not an input."}</div>
     </Card>
   );
 }
@@ -100,6 +148,7 @@ export default function Trader() {
               <Card title="Watchlist"><ul style={{ margin: 0, paddingLeft: 18 }}>{plan.watchlist.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul></Card>
             </div>
             <Card title="Review of its past calls"><p style={{ margin: 0 }}>{plan.review_of_past_calls}</p></Card>
+            {plan.packet_ref && <Inputs key={plan.packet_ref} pref={plan.packet_ref} />}
             <Card title="What it saw" right={plan.packet_ref && <button className="btn sm" onClick={async () => setPacket(packet ? null : await get(`/api/trader/packet/${plan.packet_ref}`))}>{packet ? "Hide" : "Show the exact input"}</button>}>
               {packet ? <pre className="log" style={{ maxHeight: 420 }}>{JSON.stringify(packet.packet, null, 1)}</pre> : <div className="note">The exact desk packet is stored with the plan, so you can always check what the agent was shown.</div>}
             </Card>

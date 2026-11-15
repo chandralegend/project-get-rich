@@ -48,10 +48,11 @@ def is_relevant(title: str, summary: str) -> bool:
 
 
 def pending_items(con, limit: int) -> list[dict]:
+    """Newest first: with a cap on how many items are classified, the fresh ones must not queue behind a backlog of old ones."""
     rows = con.execute(
         "SELECT n.item_id, n.source, n.title, n.summary, n.published_at, n.ingested_at FROM news_items n "
         "LEFT JOIN item_processing p ON p.item_id = n.item_id WHERE p.item_id IS NULL "
-        "ORDER BY n.ingested_at ASC LIMIT ?", [limit],
+        "ORDER BY n.ingested_at DESC LIMIT ?", [limit],
     ).fetchall()
     return [dict(zip(("item_id", "source", "title", "summary", "published_at", "ingested_at"), r)) for r in rows]
 

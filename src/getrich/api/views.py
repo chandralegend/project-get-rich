@@ -181,7 +181,7 @@ def news() -> dict:
         flags = con.execute("SELECT as_of, asset, payload FROM insights WHERE json_extract_string(payload, '$.kind') = 'risk_flag' AND epoch(as_of) >= ? ORDER BY seq DESC LIMIT 20",
                             [(now - timedelta(hours=72)).timestamp()]).fetchall()
         brief = con.execute("SELECT as_of, payload FROM insights WHERE json_extract_string(payload, '$.kind') = 'briefing' ORDER BY seq DESC LIMIT 1").fetchone()
-    out = {"events": events, "withheld": withheld, "flags": [{"as_of": iso(a), "asset": asset, **json.loads(p)} for a, asset, p in flags]}
+    out = {"events": desk._with_ages(events, now), "withheld": withheld, "freshness": desk.news_freshness(now), "flags": [{"as_of": iso(a), "asset": asset, **json.loads(p)} for a, asset, p in flags]}
     if brief:
         out["briefing"] = {"as_of": iso(brief[0]), **json.loads(brief[1])}
     return out

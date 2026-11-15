@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import timezone
 
 import numpy as np
 import pandas as pd
@@ -143,7 +144,7 @@ def journal(n: int = 8) -> dict:
     recent = []
     for as_of, asset, p, d, _ret in rows:
         p, d = json.loads(p), (json.loads(d) if d else None)
-        item = {"issued": f"{as_of:%Y-%m-%d %H:%M}", "instrument": symbol_of(asset, p), "action": p.get("action"), "setup": p.get("setup"), "conviction": p.get("conviction"), "thesis": (p.get("thesis") or "")[:160]}
+        item = {"issued": f"{as_of.astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC", "instrument": symbol_of(asset, p), "action": p.get("action"), "setup": p.get("setup"), "conviction": p.get("conviction"), "thesis": (p.get("thesis") or "")[:160]}
         if p.get("action") in SCORED:
             item["outcome"] = {"r": round(d["r"], 2), "exit": d["kind"], "hours": d["bars"]} if d else "pending"
         recent.append(item)
