@@ -25,7 +25,7 @@ Independent checks found Kronos with no skill against a random walk (BTC 24-hour
 - **Judged before use** (`getrich forecast-eval`, `docs/forecast-eval.md`): pinball-loss skill against a zero-drift random walk at the same volatility, a location-only skill, rank IC with a block-bootstrap interval, hit rate against the up rate, 80% and 40% coverage, and a Diebold-Mariano test with Newey-West errors. Windows: all history (contamination can only inflate it) and post-release only. The harness is tested to credit an oracle, give nothing to a random walk or to momentum on noise, give momentum credit when the data really trend, and expose an overconfident model through coverage.
 - **Into the PI-Net only if they earn it.** `make_dataset(foundation_models=[...])` adds an optional `foundation` channel (per model: median, probability-up, width and skew, all scaled by volatility) and keeps only the rows that have it; the fusion network masks a channel whose inputs are missing. Training on the contaminated period would teach a model to over-trust the forecasts, so a PI-Net experiment with these features must use post-release rows only, which is about 13 months, roughly 800 pooled rows: enough for a linear blend and an ablation, not for the full fusion network.
 
-## Status
+## Status (superseded by the results section below)
 
 Built and tested (336 tests, none touching a model, network or exchange): the interface, causal generation and cache, features, evaluation, the isolation runner, the registry, fetch with lock verification, the three workers (valid Python written to the documented APIs, **not yet executed** because no weights are fetched), the CLI and the dataset channel.
 
@@ -50,3 +50,21 @@ Kronos needs `forecast-fetch-code`, a read of its Python files, and `reviewed: t
 - The Chronos-2 and TimesFM 2.5 workers were checked against the installed libraries' signatures (`chronos-forecasting` 2.3.2 and `timesfm` 3.0.2, which does include the 2.5 class) but have not run yet.
 - Kronos-small ran on the post-release window (2025-08-02 onward) at about 4.4 seconds per forecast. First results, BTC: worse than a random walk at 1, 5 and 20 days (skill -0.28, -0.51, -0.52), no direction information, 80% bands that held 63%, 54% and 47% of the time. Full numbers: `getrich forecast-eval`.
 - A bug found on the way: the cache used to be written once per symbol, so an interrupted run lost its batches. It is now written after every batch (tested).
+
+## Results (2026-11-15)
+
+All three models ran walk-forward on BTCUSDT and ETHUSDT (full report: [forecast-eval.md](forecast-eval.md); regenerate with `uv run getrich forecast-eval --write`). **None shows skill against a random walk, so none may influence a trade.**
+
+| Model | Origins scored | Skill at 1, 5, 20 days | Direction (rank correlation, 20 days) | 80% band held, 1, 5, 20 days |
+|---|---:|---|---|---|
+| Chronos-2, all history | about 4,000 | -0.044, -0.009, -0.016 | -0.064 (-0.15, +0.02) | 82%, 78%, 76% |
+| Chronos-2, after release | about 780 | -0.034, -0.019, -0.020 | -0.222 (-0.45, +0.00) | 83%, 81%, 74% |
+| TimesFM 2.5, all history | about 4,000 | -0.047, -0.018, -0.040 | -0.100 (-0.19, -0.00) | 89%, 83%, 80% |
+| TimesFM 2.5, after release | about 850 | -0.037, -0.022, -0.013 | +0.067 (-0.16, +0.28) | 89%, 85%, 81% |
+| Kronos-small, after release | about 930 | -0.325, -0.619, -0.746 | +0.077 (-0.13, +0.27) | 63%, 57%, 45% |
+
+Reading: Chronos-2 and TimesFM are about a random walk with fair bands; Kronos is clearly worse and overconfident. The full history may overlap what the models were trained on, which can only flatter them. TimesFM's direction is slightly anti-predictive over the full history; flipping it would be fitting the past and needs its own pre-registered test. Neighbouring days overlap, so the effective sample is roughly n divided by the horizon.
+
+Bugs found by running them for real, both fixed with tests: Kronos sometimes samples paths whose price goes to zero (invalid paths are dropped and counted, an origin with fewer than 8 of 12 valid paths is recorded as failed and never retried), and TimesFM pads its input list in place to a multiple of its batch size, which broke the output indexing for a final chunk that was not a multiple of 32.
+
+Still untested: Chronos-2 and TimesFM as volatility forecasters against HAR, and TinyTimeMixer (not built).
