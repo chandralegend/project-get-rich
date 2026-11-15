@@ -99,3 +99,55 @@ def test_a_dataset_never_silently_drops_a_foundation_model_with_no_forecasts():
     daily, _ = _synthetic(300)
     with pytest.raises(RuntimeError, match="forecast-run"):
         features.foundation_frame("BTCUSDT", daily, ["chronos2"])
+
+
+def _news_for(daily, start_offset=0, seed=1):
+    from getrich.news import gdelt_timeline as g
+
+    rng = np.random.default_rng(seed)
+    idx = daily.index[start_offset:]
+    return pd.DataFrame(rng.normal(0, 1, (len(idx), len(g.FEATURES))), index=idx, columns=g.FEATURES)
+
+
+def test_a_news_channel_is_joined_by_day_and_restricts_rows_to_days_with_news():
+    daily, hourly = _synthetic(900)
+    base = features.build_symbol_frame("BTCUSDT", daily, hourly, CostModel())
+    news = _news_for(daily, start_offset=500)
+    joined = features.build_symbol_frame("BTCUSDT", daily, hourly, CostModel(), news=news)
+    assert 0 < len(joined) < len(base) and joined.index.min() >= daily.index[500]
+    assert set(news.columns) <= set(joined.columns) and not joined[list(news.columns)].isna().any().any()
+    row = joined.index[10]
+    assert joined.loc[row, news.columns[0]] == news.loc[row, news.columns[0]]                 # the value joined is the same day's, not a neighbour's
+
+
+def test_channels_can_be_selected_without_changing_rows_labels_or_order():
+    from getrich.forecast.fakes import RandomWalk
+    from getrich.forecast.features import foundation_features
+    from getrich.forecast.generate import generate
+
+    daily, hourly = _synthetic(900)
+    cache = generate(RandomWalk(), "BTCUSDT", daily, stride=1, since=daily.index[400])
+    fnd = foundation_features(cache, labels_vol(daily), "fake_rw")
+    news = _news_for(daily, start_offset=450)
+    frame = features.build_symbol_frame("BTCUSDT", daily, hourly, CostModel(), foundation=fnd, news=news)
+    ds = features.from_frames([frame], extra=list(fnd.columns), news_cols=list(news.columns))
+    assert list(ds.channels) == ["market", "forecast", "context", "foundation", "news"]
+    for names in (["market", "forecast", "context"], ["market", "forecast", "context", "foundation"], ["market", "forecast", "context", "news"], list(ds.channels)):
+        sub = ds.subset(names)
+        assert len(sub) == len(ds) and (sub.y == ds.y).all() and (sub.t0 == ds.t0).all() and (sub.r_net == ds.r_net).all()
+        assert sub.X.shape[1] == sum(len(ds.channels[n]) for n in names) == len(sub.columns)
+        for n in names:                                                                       # channel indices still point at the right columns
+            np.testing.assert_array_equal(sub.X[:, sub.channel_idx(n)], ds.X[:, ds.channel_idx(n)])
+    with pytest.raises(ValueError, match="unknown channels"):
+        ds.subset(["market", "text"])
+
+
+def labels_vol(daily):
+    from getrich.eval import labels
+
+    return labels.daily_vol(daily["close"])
+
+
+def test_the_dataset_refuses_an_unknown_news_source():
+    with pytest.raises(ValueError, match="only 'gdelt'"):
+        features.news_frame("twitter")

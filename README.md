@@ -37,6 +37,10 @@ uv run getrich approve <order_id>                # you approve (typed yes); ther
 uv run getrich positions       # paper equity, positions, realised result, halts  (add --venue testnet for the Binance testnet)
 uv run getrich replay          # replay stored history through the real gate and paper broker; invariants plus comparison with the baselines (local only)
 uv run getrich forecast-eval   # score cached Kronos / Chronos-2 / TimesFM forecasts against a random walk (weights are fetched explicitly: docs/forecast-models.md)
+uv run getrich news-fetch      # daily GDELT news series (slow on purpose, cached, resumable)
+uv run getrich news-study      # exploratory: do news features line up with forward BTC/ETH returns at all?
+uv run getrich pinet-train --forecaster chronos2 --news gdelt --models lgbm --save   # EXPLORATORY: pick a forecaster/news channel, train, compare with baseline on identical rows
+uv run getrich preregister && uv run getrich pinet-experiment   # the PRE-REGISTERED ablation (docs/preregistration-news-forecast.md)
 uv run getrich kill            # kill switch: flatten everything, block new positions (unkill / unhalt to resume)
 ```
 

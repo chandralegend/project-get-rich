@@ -6,6 +6,11 @@ results, which is not acceptable here. So every model runs in a fresh process an
 
   python -m getrich.eval.pinet_worker --model lgbm --out preds.npz [--null 40]
   python -m getrich.eval.pinet_worker --model fusion --synthetic 0.4 --seed 3     (controls; prints JSON)
+  python -m getrich.eval.pinet_worker --model lgbm --meta --foundation chronos2 --news gdelt \
+         --channels market,forecast,context,foundation,news --out preds.npz --save model.pkl
+
+--foundation / --news add the pretrained forecaster's features and the GDELT news features to the dataset; --channels picks which channels
+the model may see (the rows stay identical, so variants can be compared); --save also fits a final model on all rows and pickles it.
 
 Output npz: preds (paths, n, 2), real_score, null_scores, p_value, and the row order used.
 """
@@ -57,6 +62,25 @@ def make_factory(name: str, ds: Dataset, epochs: int | None = None):
     raise ValueError(f"unknown model {name!r}")
 
 
+def build_dataset(meta: bool, foundation: str | None, news: str | None, channels: list[str] | None) -> Dataset:
+    kw = dict(META_KWARGS) if meta else {}
+    ds = make_dataset(foundation_models=[foundation] if foundation else None, news=news, **kw)
+    return ds.subset(channels) if channels else ds
+
+
+def save_final(name: str, ds: Dataset, path: str, info: dict, epochs: int | None = None) -> None:
+    """Fit on every row and keep the model with what it needs to be used later: its columns, channels and training span. This is the
+    deployable fit; the honest estimate of how it performs is the cross-validated evaluation, not this fit."""
+    import pickle
+    from datetime import datetime, timezone
+
+    model = make_factory(name, ds, epochs)().fit(ds.X, ds.y, ds.r_net, ds.aux)
+    meta = {"model": name, "columns": list(ds.columns), "channels": {k: list(v) for k, v in ds.channels.items()}, "rows": len(ds),
+            "from": str(ds.bar.min().date()), "to": str(ds.bar.max().date()), "trained_at": datetime.now(timezone.utc).isoformat(), **info}
+    with open(path, "wb") as f:
+        pickle.dump({"model": model, "meta": meta}, f)
+
+
 def evaluate(name: str, ds: Dataset, n_null: int = 0, seed: int = 0, epochs: int | None = None, embargo=EMBARGO) -> dict:
     cv, factory = _cv(embargo), make_factory(name, ds, epochs)
     paths = pinet.cpcv_predictions(factory, ds, cv)
@@ -84,16 +108,21 @@ def main(argv=None) -> int:
     p.add_argument("--synthetic", type=float, help="alpha of a synthetic world (control mode, prints JSON)")
     p.add_argument("--epochs", type=int)
     p.add_argument("--meta", action="store_true", help="meta-label experiment: trend-entry days, 4/2 sigma, 20-day horizon")
+    p.add_argument("--foundation", help="pretrained forecaster whose cached forecasts become the 'foundation' channel (e.g. chronos2)")
+    p.add_argument("--news", choices=["gdelt"], help="add the daily GDELT news features as the 'news' channel")
+    p.add_argument("--channels", help="comma-separated channels the model may use, e.g. market,forecast,context,news")
+    p.add_argument("--save", help="also fit a final model on all rows and pickle it to this path")
     a = p.parse_args(argv)
     if a.synthetic is not None:
         ds = synthetic_dataset(a.synthetic, a.seed)
-    elif a.meta:
-        ds = make_dataset(**META_KWARGS)
     else:
-        ds = make_dataset()
+        ds = build_dataset(a.meta, a.foundation, a.news, a.channels.split(",") if a.channels else None)
     res = evaluate(a.model, ds, a.null, a.seed, a.epochs, META_EMBARGO if a.meta else EMBARGO)
     if a.synthetic is not None:
         print(json.dumps({"model": a.model, "alpha": a.synthetic, "score": res["real_score"], "p": res["p_value"]}))
+    if a.save and a.synthetic is None:
+        save_final(a.model, ds, a.save, {"foundation": a.foundation, "news": a.news, "meta_geometry": a.meta, "cv_score": res["real_score"]}, a.epochs)
+        print(f"saved final {a.model} fit to {a.save}", file=sys.stderr)
     if a.out:
         np.savez(a.out, preds=res["preds"], real_score=res["real_score"], null_scores=res["null_scores"], p_value=res["p_value"],
                  t0=ds.t0.astype("int64"), asset=ds.asset)

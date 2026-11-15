@@ -91,10 +91,21 @@ class Dataset:
     def channel_idx(self, name: str) -> list[int]:
         return [self.columns.index(c) for c in self.channels[name]]
 
+    def subset(self, names: list[str]) -> "Dataset":
+        """The same rows with only the named channels as inputs (for ablations: identical rows, labels and folds, different features)."""
+        unknown = [n for n in names if n not in self.channels]
+        if unknown:
+            raise ValueError(f"unknown channels {unknown}; this dataset has {list(self.channels)}")
+        cols = [c for n in names for c in self.channels[n]]
+        keep = [self.columns.index(c) for c in cols]
+        from dataclasses import replace
+
+        return replace(self, X=self.X[:, keep], columns=cols, channels={n: list(self.channels[n]) for n in names})
+
 
 def build_symbol_frame(symbol: str, daily: pd.DataFrame, hourly: pd.DataFrame, cost: CostModel, *,
                        tp_mult: float = 2.0, sl_mult: float = 1.0, horizon: int = 10,
-                       primary_min_votes: float | None = None, foundation: pd.DataFrame | None = None) -> pd.DataFrame:
+                       primary_min_votes: float | None = None, foundation: pd.DataFrame | None = None, news: pd.DataFrame | None = None) -> pd.DataFrame:
     """`foundation`: optional features from the pretrained forecasters, indexed by origin bar. When given, only the rows that have them are kept."""
     rv = har.daily_rv_from_hourly(hourly)
     har_vol = np.sqrt(har.har_forecast(rv) * 365).reindex(daily.index)
@@ -113,8 +124,11 @@ def build_symbol_frame(symbol: str, daily: pd.DataFrame, hourly: pd.DataFrame, c
     out = lab.join(feats[ALL], how="inner")
     extra: list[str] = []
     if foundation is not None:
-        extra = list(foundation.columns)
+        extra += list(foundation.columns)
         out = out.join(foundation, how="inner")
+    if news is not None:                                   # news for day t is known at the close of day t's bar, when the decision is taken
+        extra += list(news.columns)
+        out = out.join(news, how="inner")
     out["asset"] = symbol
     out = out.dropna(subset=ALL + extra)
     if primary_min_votes is not None:   # meta-labelling: keep only the days the primary (trend) rule says long
@@ -137,23 +151,39 @@ def foundation_frame(symbol: str, daily: pd.DataFrame, models: list[str]) -> pd.
     return pd.concat(parts, axis=1)
 
 
-def make_dataset(symbols=("BTCUSDT", "ETHUSDT"), cost: CostModel | None = None, foundation_models: list[str] | None = None, **kw) -> Dataset:
+def news_frame(source: str = "gdelt") -> pd.DataFrame:
+    """The causal daily news features. Only GDELT exists; anything else raises rather than silently returning nothing."""
+    if source != "gdelt":
+        raise ValueError(f"unknown news source {source!r}; only 'gdelt' exists")
+    from ..news import gdelt_timeline
+
+    daily, _info = gdelt_timeline.load_daily()
+    return gdelt_timeline.news_features(daily)
+
+
+def make_dataset(symbols=("BTCUSDT", "ETHUSDT"), cost: CostModel | None = None, foundation_models: list[str] | None = None,
+                 news: str | None = None, **kw) -> Dataset:
+    """Optional channels: `foundation_models` adds the pretrained forecasters' features (channel "foundation"); `news` adds the
+    news series (channel "news"). With either, only rows that have the features are kept, and every variant of a comparison
+    must be built from the SAME call and then narrowed with Dataset.subset, so the rows are identical."""
     cost = cost or CostModel()
-    frames, extra = [], []
+    frames, fcols, ncols = [], [], []
+    nws = news_frame(news) if news else None
     for s in symbols:
         daily = load_bars(s, "1d")
         fnd = foundation_frame(s, daily, foundation_models) if foundation_models else None
-        extra = list(fnd.columns) if fnd is not None else []
-        frames.append(build_symbol_frame(s, daily, load_bars(s, "1h"), cost, foundation=fnd, **kw))
-    return from_frames(frames, extra=extra)
+        fcols = list(fnd.columns) if fnd is not None else []
+        ncols = list(nws.columns) if nws is not None else []
+        frames.append(build_symbol_frame(s, daily, load_bars(s, "1h"), cost, foundation=fnd, news=nws, **kw))
+    return from_frames(frames, extra=fcols, news_cols=ncols)
 
 
-def from_frames(frames: list[pd.DataFrame], extra: list[str] | None = None) -> Dataset:
-    extra = extra or []
+def from_frames(frames: list[pd.DataFrame], extra: list[str] | None = None, news_cols: list[str] | None = None) -> Dataset:
+    extra, news_cols = extra or [], news_cols or []
     df = pd.concat(frames).reset_index().rename(columns={"index": "bar"})
     df = df.sort_values(["t0", "asset"], kind="stable").reset_index(drop=True)
     return Dataset(
-        X=df[ALL + extra].to_numpy(dtype=np.float32),
+        X=df[ALL + extra + news_cols].to_numpy(dtype=np.float32),
         y=df["label"].to_numpy(dtype=int),
         r_net=df["r_net"].to_numpy(dtype=float),
         r_gross=df["r_gross"].to_numpy(dtype=float),
@@ -163,6 +193,6 @@ def from_frames(frames: list[pd.DataFrame], extra: list[str] | None = None) -> D
         asset=df["asset"].to_numpy(),
         bar=pd.DatetimeIndex(df["bar"]),
         aux=df[["aux_ret", "aux_rv"]].to_numpy(dtype=float),
-        columns=list(ALL) + extra,
-        channels={**CHANNELS, **({"foundation": extra} if extra else {})},
+        columns=list(ALL) + extra + news_cols,
+        channels={**CHANNELS, **({"foundation": extra} if extra else {}), **({"news": news_cols} if news_cols else {})},
     )

@@ -179,6 +179,21 @@ def main(argv: list[str] | None = None) -> int:
     fr.add_argument("--max-new", type=int, default=None, help="stop after this many new forecasts per symbol (for a timing trial)")
     fe = sub.add_parser("forecast-eval", help="score cached forecasts against a random walk; writes docs/forecast-eval.md with --write")
     fe.add_argument("--write", action="store_true")
+    nf = sub.add_parser("news-fetch", help="fetch the daily GDELT news series (volume and tone per topic) used by the PI-Net news channel; slow on purpose, cached")
+    nf.add_argument("--refresh", action="store_true", help="refetch series that are already cached")
+    ns = sub.add_parser("news-study", help="exploratory: do the daily GDELT news features line up with forward BTC/ETH returns at all? writes docs/news-study.md with --write")
+    ns.add_argument("--write", action="store_true")
+    pr = sub.add_parser("preregister", help="log the SHA-256 of a pre-registration file so later edits are visible; the experiment refuses to run on an unlogged file")
+    pr.add_argument("file", nargs="?", default="docs/preregistration-news-forecast.md")
+    pt = sub.add_parser("pinet-train", help="EXPLORATORY: train the PI-Net with a selected forecaster and/or news channel, compare with the baseline on identical rows (CPCV + strategy backtest); not registered")
+    pt.add_argument("--forecaster", choices=["chronos2", "timesfm25", "kronos_small", "none"], default="chronos2", help="pretrained forecaster whose cached forecasts become a channel")
+    pt.add_argument("--news", choices=["gdelt", "none"], default="gdelt", help="news channel")
+    pt.add_argument("--models", default="lgbm", help="comma-separated: linear, lgbm, fusion")
+    pt.add_argument("--null", type=int, default=0, help="shift-null draws per run (0 = skip)")
+    pt.add_argument("--save", action="store_true", help="also fit a final model on all rows and save it under data/models/pinet/")
+    pe = sub.add_parser("pinet-experiment", help="run the PRE-REGISTERED ablation (baseline, +forecaster, +news, +both; three models); writes docs/news-forecast-results.md")
+    pe.add_argument("--forecaster", choices=["chronos2", "timesfm25", "kronos_small"], default="chronos2")
+    pe.add_argument("--no-register", action="store_true", help="do not add the variants to the trial registry")
     posp = sub.add_parser("positions", help="account: equity, open positions, realised result, halts")
     posp.add_argument("--venue", choices=["paper", "testnet"], default="paper", help="paper = local simulator (default); testnet = Binance Spot Testnet, virtual money")
     tk = sub.add_parser("paper-tick", help="check for triggered stops and take profits (stored bars for paper, the exchange for testnet); snapshot equity")
@@ -229,6 +244,45 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
     if args.cmd in ("propose", "approve", "reject", "orders", "positions", "paper-tick", "kill", "unkill", "unhalt", "limits-pin"):
         return _trading_command(args)
+    if args.cmd == "news-fetch":
+        from .news import gdelt_timeline
+
+        res = gdelt_timeline.fetch_all(refresh=args.refresh, progress=lambda name, mode, n: print(f"  fetched {name}/{mode} ({n})", flush=True))
+        print(res)
+        return 0
+    if args.cmd == "news-study":
+        from .news import study
+
+        res = study.run()
+        text = study.to_markdown(res)
+        print(text)
+        if args.write:
+            (config.root() / "docs" / "news-study.md").write_text(text)
+            print("wrote docs/news-study.md")
+        return 0
+    if args.cmd == "preregister":
+        from .eval import channel_ablation
+
+        print("logged", channel_ablation.register_prereg(args.file))
+        return 0
+    if args.cmd == "pinet-train":
+        from .eval import channel_ablation
+
+        fm = None if args.forecaster == "none" else args.forecaster
+        nw = None if args.news == "none" else args.news
+        res = channel_ablation.train(fm, nw, tuple(m for m in args.models.split(",") if m), save_dir=config.root() / "data" / "models" / "pinet" if args.save else None,
+                                     null_count=args.null)
+        print(channel_ablation.train_markdown(res))
+        return 0
+    if args.cmd == "pinet-experiment":
+        from .eval import channel_ablation
+
+        res = channel_ablation.run(foundation=args.forecaster, news="gdelt", register=not args.no_register)
+        text = channel_ablation.to_markdown(res)
+        print(text)
+        (config.root() / "docs" / "news-forecast-results.md").write_text(text)
+        print("wrote docs/news-forecast-results.md")
+        return 0
     if args.cmd in ("forecast-fetch", "forecast-fetch-code", "forecast-run", "forecast-eval"):
         return _forecast_command(args)
     if args.cmd == "replay":
