@@ -202,5 +202,17 @@
     "name": "news-forecast-v1:fusion:D",
     "sharpe_annual": 0.1352,
     "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 4,
+    "name": "voltarget-gate-v1:entry-1of3",
+    "sharpe_annual": 0.8154,
+    "source": "docs/phase4-voltarget-entry.md"
+  },
+  {
+    "phase": 4,
+    "name": "voltarget-gate-v1:entry-2of3",
+    "sharpe_annual": 0.9545,
+    "source": "docs/phase4-voltarget-entry.md"
   }
 ]

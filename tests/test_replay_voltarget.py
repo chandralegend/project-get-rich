@@ -35,3 +35,23 @@ def test_a_tighter_exposure_cap_never_lets_exposure_exceed_it_at_entry():
     res, info = rv.run(two(drift=0.004, vol=0.02), ReplayConfig(limits=tight))
     assert res.violations == []
     assert info["binding"].get("exposure cap", 0) + info["binding"].get("risk budget", 0) + info["binding"].get("requested quantity", 0) == info["events"].get("entry", 0)
+
+
+def test_entering_only_at_two_of_three_votes_takes_no_more_entries_and_the_default_is_unchanged():
+    bars = two(seed=4, drift=0.002, vol=0.03)
+    cfg = ReplayConfig(limits=LIM)
+    base, bi = rv.run(bars, cfg)
+    same, si = rv.run(bars, cfg, 0.0)
+    strict, ti = rv.run(bars, cfg, 2 / 3)
+    assert base.equity.equals(same.equity) and bi == si                          # the default is the original strategy
+    assert ti["events"].get("entry", 0) <= bi["events"].get("entry", 0)
+    assert strict.violations == []
+
+
+def test_the_study_refuses_an_unlogged_preregistration(monkeypatch):
+    import pytest
+
+    import getrich.eval.channel_ablation as ca
+    monkeypatch.setattr(ca, "prereg_events", lambda: [])
+    with pytest.raises(RuntimeError, match="does not match any logged hash"):
+        rv.study(limits=LIM, register=False, bars=two())

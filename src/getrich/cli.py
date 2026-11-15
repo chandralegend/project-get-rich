@@ -188,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("file", nargs="?", default="docs/preregistration-news-forecast.md")
     rvt = sub.add_parser("replay-voltarget", help="replay the volatility-scaled trend strategy through the real gate and approved limits; writes docs/phase4-voltarget.md with --write")
     rvt.add_argument("--write", action="store_true")
+    rvs = sub.add_parser("replay-voltarget-study", help="run the PRE-REGISTERED comparison of entering the gated vol-scaled strategy at 1 of 3 versus 2 of 3 votes; writes docs/phase4-voltarget-entry.md")
+    rvs.add_argument("--no-register", action="store_true")
     ps = sub.add_parser("portfolio-study", help="run the PRE-REGISTERED wider-universe trend and momentum study; writes docs/portfolio-study.md")
     ps.add_argument("--no-register", action="store_true", help="do not add the strategies to the trial registry")
     pt = sub.add_parser("pinet-train", help="EXPLORATORY: train the PI-Net with a selected forecaster and/or news channel, compare with the baseline on identical rows (CPCV + strategy backtest); not registered")
@@ -280,6 +282,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.write:
             (config.root() / "docs" / "phase4-voltarget.md").write_text(text)
             print("wrote docs/phase4-voltarget.md")
+        return 0
+    if args.cmd == "replay-voltarget-study":
+        from .trading import replay_voltarget
+
+        res = replay_voltarget.study(register=not args.no_register)
+        text = replay_voltarget.study_markdown(res)
+        print(text)
+        (config.root() / "docs" / "phase4-voltarget-entry.md").write_text(text)
+        print("wrote docs/phase4-voltarget-entry.md")
         return 0
     if args.cmd == "portfolio-study":
         from .eval import portfolio_study

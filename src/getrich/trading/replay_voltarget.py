@@ -32,7 +32,7 @@ STOP_SIGMA = 3.0
 SLEEVE = 0.5
 
 
-def run(bars: dict[str, pd.DataFrame], cfg: ReplayConfig) -> tuple[ReplayResult, dict]:
+def run(bars: dict[str, pd.DataFrame], cfg: ReplayConfig, entry_min_signal: float = 0.0) -> tuple[ReplayResult, dict]:
     syms = [s for s in cfg.symbols if s in bars]
     idx = bars[syms[0]].index
     for s in syms[1:]:
@@ -91,7 +91,7 @@ def run(bars: dict[str, pd.DataFrame], cfg: ReplayConfig) -> tuple[ReplayResult,
                         if pos[s]["qty"] <= 1e-12:
                             del pos[s]
                 continue
-            if tw <= 0.0:
+            if tw <= 0.0 or float(sig[s].iloc[i]) < entry_min_signal - 1e-9:
                 continue
             wanted.append(tw)
             intent = OrderIntent(s, "buy", qty=tw * equity / c, stop_price=c * (1 - STOP_SIGMA * sg), source="voltarget_replay")
@@ -182,4 +182,82 @@ def to_markdown(out: dict) -> str:
           "- The gate-compatible version earns less than the research baseline because it cannot add: a position opened at one or two trend votes stays small even when the trend strengthens, and the 3 sigma stops (15 of them) probably end positions the baseline would have kept.",
           "- Its risk is small and steady. Compared with the gated trend rule under the same limits it has a lower drawdown for a comparable or better Sharpe, which is the point of volatility scaling.",
           "- Everything here is in-sample on one crypto cycle, with one pre-declared stop multiple. It is not a test of an edge, and buy and hold still returned far more.", ""]
+    return "\n".join(L_)
+
+
+PREREG = "docs/preregistration-voltarget-entry.md"
+
+
+def study(limits: L.Limits | None = None, register: bool = True, require_prereg: bool = True, bars: dict | None = None) -> dict:
+    """The pre-registered comparison of entering at 1 of 3 votes (V1) against 2 of 3 votes (V2). See docs/preregistration-voltarget-entry.md."""
+    from ..eval import metrics, trials
+    from ..eval.channel_ablation import prereg_events, prereg_hash
+    from ..eval.costs import CostModel
+    from ..eval.data import load_bars
+    from .replay import SYMBOLS, run as run_trend
+
+    h = prereg_hash(PREREG) if require_prereg else None
+    if require_prereg and h not in {e.get("sha256") for e in prereg_events()}:
+        raise RuntimeError("the voltarget pre-registration does not match any logged hash: run `getrich preregister docs/preregistration-voltarget-entry.md`")
+    if limits is None:
+        limits, why = L.load()
+        if limits is None:
+            raise RuntimeError(f"cannot replay without usable limits: {why}")
+    bars = bars or {s: load_bars(s, "1d") for s in SYMBOLS}
+    runs = {}
+    for label, mult in (("base", 1.0), ("2x", 2.0)):
+        cfg = ReplayConfig(limits=limits, costs=CostModel().stressed(mult) if mult != 1.0 else CostModel())
+        v1, i1 = run(bars, cfg, 0.0)
+        v2, i2 = run(bars, cfg, 2 / 3)
+        runs[label] = {"V1": (v1, i1), "V2": (v2, i2), "trend": run_trend(bars, cfg)}
+    first = runs["base"]["trend"].trades["entry"].min()
+
+    def window(r):
+        return r[r.index >= first]
+    rows = {}
+    base_period = {k: float(window(runs["base"][k][0].returns).mean() / window(runs["base"][k][0].returns).std(ddof=1)) for k in ("V1", "V2")}
+    all_trials = trials.period_sharpes() + list(base_period.values())
+    for k in ("V1", "V2"):
+        rb, rh = window(runs["base"][k][0].returns), window(runs["2x"][k][0].returns)
+        mid = rh.index[len(rh) // 2]
+        rows[k] = {"sharpe": metrics.sharpe(rb), "sharpe_2x": metrics.sharpe(rh), "cagr": metrics.cagr(rb), "total": float((1 + rb).prod() - 1), "max_dd": metrics.max_drawdown(rb),
+                   "half1_2x": metrics.sharpe(rh[rh.index < mid]), "half2_2x": metrics.sharpe(rh[rh.index >= mid]), "dsr": metrics.deflated_sharpe(rb, all_trials),
+                   "entries": runs["base"][k][1]["events"].get("entry", 0), "stops": runs["base"][k][1]["events"].get("stop", 0),
+                   "violations": len(runs["base"][k][0].violations) + len(runs["2x"][k][0].violations),
+                   "halted": runs["base"][k][0].halted_on is not None or runs["2x"][k][0].halted_on is not None,
+                   "exposure": float(window(runs["base"][k][0].exposure).mean())}
+    trend_2x = metrics.sharpe(window(runs["2x"]["trend"].returns))
+    trend_base = window(runs["base"]["trend"].returns)
+    rows["trend"] = {"sharpe": metrics.sharpe(trend_base), "sharpe_2x": trend_2x, "cagr": metrics.cagr(trend_base), "total": float((1 + trend_base).prod() - 1), "max_dd": metrics.max_drawdown(trend_base)}
+    v2 = rows["V2"]
+    crit = {"gain_vs_V1_and_trend": v2["sharpe_2x"] - rows["V1"]["sharpe_2x"] >= 0.10 and v2["sharpe_2x"] - trend_2x >= 0.10, "dsr": v2["dsr"] >= 0.90,
+            "drawdown": v2["max_dd"] <= 0.20, "both_halves_positive": v2["half1_2x"] > 0 and v2["half2_2x"] > 0, "clean": v2["violations"] == 0 and not v2["halted"]}
+    v2["criteria"], v2["shows_value"] = crit, all(crit.values())
+    if register:
+        trials.register(4, "voltarget-gate-v1:entry-1of3", rows["V1"]["sharpe"], "docs/phase4-voltarget-entry.md")
+        trials.register(4, "voltarget-gate-v1:entry-2of3", rows["V2"]["sharpe"], "docs/phase4-voltarget-entry.md")
+    from ..obs.events import emit
+
+    emit("eval.voltarget_entry_run", service="eval", prereg_sha256=h, n_trials=len(all_trials), shows_value=v2["shows_value"])
+    return {"rows": rows, "limits": limits, "prereg": h, "n_trials": len(all_trials), "start": first, "end": runs["base"]["V1"][0].equity.index[-1]}
+
+
+def study_markdown(res: dict) -> str:
+    R, lim = res["rows"], res["limits"]
+    def pct(x):
+        return f"{x * 100:.1f}%"
+    L_ = ["# Gated volatility-scaled trend: entry at 1 of 3 votes versus 2 of 3 (pre-registered)", "",
+          f"Pre-registration: `{PREREG}`, SHA-256 `{(res['prereg'] or 'unchecked')[:16]}...` (matches the hash logged before the run). "
+          f"{res['start']:%Y-%m-%d} to {res['end']:%Y-%m-%d}; limits {lim.profile} (exposure {lim.max_exposure_fraction:.0%}, halt {lim.account_drawdown_halt:.0%}, risk per trade {lim.risk_per_trade:.1%}). "
+          f"Deflated Sharpe counts {res['n_trials']} trials.", "",
+          "| | Total | CAGR | Sharpe | at 2x costs | Max DD | Half 1 / half 2 at 2x | Deflated Sharpe | Entries / stops | Avg exposure |", "|---|---:|---:|---:|---:|---:|---|---:|---|---:|"]
+    for k, name in (("V1", "V1, enter at 1 of 3 votes"), ("V2", "V2, enter at 2 of 3 votes")):
+        r = R[k]
+        L_.append(f"| {name} | {r['total']:+.1%} | {pct(r['cagr'])} | {r['sharpe']:.2f} | {r['sharpe_2x']:.2f} | {pct(r['max_dd'])} | {r['half1_2x']:.2f} / {r['half2_2x']:.2f} | {r['dsr']:.3f} | {r['entries']} / {r['stops']} | {pct(r['exposure'])} |")
+    t = R["trend"]
+    L_.append(f"| reference: gated 2 sigma / 4 sigma trend rule | {t['total']:+.1%} | {pct(t['cagr'])} | {t['sharpe']:.2f} | {t['sharpe_2x']:.2f} | {pct(t['max_dd'])} | | | | |")
+    c = R["V2"]["criteria"]
+    verdict = "**V2 shows value**" if R["V2"]["shows_value"] else "**V2: not shown** (" + ", ".join(k for k, ok in c.items() if not ok) + " failed)"
+    L_ += ["", verdict, "", "Criteria (all required for V2): Sharpe at 2x costs at least 0.10 above both V1 and the gated trend rule, Deflated Sharpe at least 0.90, maximum drawdown at most 20%, "
+           "positive Sharpe at 2x costs in both halves, zero invariant violations and no halt.", ""]
     return "\n".join(L_)
