@@ -216,7 +216,9 @@ def study(limits: L.Limits | None = None, register: bool = True, require_prereg:
         return r[r.index >= first]
     rows = {}
     base_period = {k: float(window(runs["base"][k][0].returns).mean() / window(runs["base"][k][0].returns).std(ddof=1)) for k in ("V1", "V2")}
-    all_trials = trials.period_sharpes() + list(base_period.values())
+    known = {e["name"] for e in trials.load()}                       # a re-run must not count its own earlier registration twice
+    fresh = [v for k, v in base_period.items() if f"voltarget-gate-v1:entry-{'1of3' if k == 'V1' else '2of3'}" not in known]
+    all_trials = trials.period_sharpes() + fresh
     for k in ("V1", "V2"):
         rb, rh = window(runs["base"][k][0].returns), window(runs["2x"][k][0].returns)
         mid = rh.index[len(rh) // 2]
