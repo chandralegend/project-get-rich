@@ -131,3 +131,34 @@ def test_equity_matches_cash_flows_when_there_are_no_costs():
     r = run(closes, -1, costs=CostModel(0.0, 0.0), funding_8h=0.0)
     t = r.trades.iloc[0]
     assert r.equity.iloc[-1] == pytest.approx(500 + t["pnl"], rel=1e-9)
+
+
+def _two_entries_around_a_crash():
+    c = [100] * 4 + list(np.linspace(100, 70, 20)) + [70] * 80
+
+    def strat(px):
+        d = pd.Series(0, index=px.index)
+        d.iloc[3] = 1
+        d.iloc[60] = 1                                         # after the halt, inside a long cool-off or after a short one
+        d.iloc[90] = 1
+        return d, pd.Series(0.02, index=px.index)
+    return c, strat
+
+
+def test_without_a_cooloff_the_halt_latches_for_good():
+    c, strat = _two_entries_around_a_crash()
+    r = rf.run({"BTCUSDT": bars(c)}, cfg(limits=lim(account_drawdown_halt=0.04, risk_per_trade=0.05)), strat)
+    assert len(r.halts) == 1 and len(r.trades) == 1
+
+
+def test_with_a_cooloff_the_owner_reset_lets_trading_resume_and_restarts_the_peak():
+    c, strat = _two_entries_around_a_crash()
+    r = rf.run({"BTCUSDT": bars(c)}, cfg(limits=lim(account_drawdown_halt=0.04, risk_per_trade=0.05), halt_cooloff_bars=48, horizon_bars=10), strat)
+    assert r.halts and len(r.trades) >= 3                       # the entry at bar 90 is allowed once 48 bars have passed
+    assert not r.violations                                     # and nothing entered while latched
+
+
+def test_entries_inside_the_cooloff_are_still_blocked():
+    c, strat = _two_entries_around_a_crash()
+    r = rf.run({"BTCUSDT": bars(c)}, cfg(limits=lim(account_drawdown_halt=0.04, risk_per_trade=0.05), halt_cooloff_bars=500), strat)
+    assert len(r.trades) == 1 and r.rejections["halt_latch"] >= 1

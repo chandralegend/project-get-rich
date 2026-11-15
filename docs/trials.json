@@ -232,5 +232,23 @@
     "name": "futures-breakout:F2",
     "sharpe_annual": 0.3692,
     "source": "docs/phase5-futures-breakout.md"
+  },
+  {
+    "phase": 4,
+    "name": "futures-breakout-reset:G0",
+    "sharpe_annual": 0.1795,
+    "source": "docs/phase5-futures-breakout-reset.md"
+  },
+  {
+    "phase": 4,
+    "name": "futures-breakout-reset:G1",
+    "sharpe_annual": -0.523,
+    "source": "docs/phase5-futures-breakout-reset.md"
+  },
+  {
+    "phase": 4,
+    "name": "futures-breakout-reset:G2",
+    "sharpe_annual": -0.5208,
+    "source": "docs/phase5-futures-breakout-reset.md"
   }
 ]

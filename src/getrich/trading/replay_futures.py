@@ -47,6 +47,7 @@ class FuturesConfig:
     costs: CostModel = field(default_factory=CostModel)
     funding_8h: float = FUNDING_8H
     symbols: tuple[str, ...] = SYMBOLS
+    halt_cooloff_bars: int | None = None             # None: the halt latches for good. N: the owner is assumed to review and reset it N bars after it trips
 
 
 @dataclass
@@ -61,6 +62,7 @@ class FuturesResult:
     signal_bars: dict[str, int]
     exposure: pd.Series
     config: FuturesConfig
+    halts: list = field(default_factory=list)       # every time the drawdown halt tripped
 
     @property
     def returns(self) -> pd.Series:
@@ -103,6 +105,7 @@ def run(bars: dict[str, pd.DataFrame], cfg: FuturesConfig, strategy: Callable = 
     lim = cfg.limits
 
     wallet, equity_prev, peak, halted_on, liquidated_on = cfg.start_equity, cfg.start_equity, cfg.start_equity, None, None
+    halt_since, halts = None, []
     day_start_eq, cur_day, funding_paid = cfg.start_equity, None, 0.0
     pos: dict[str, dict] = {}
     trades, violations, rejections, signal_bars = [], [], Counter(), Counter()
@@ -170,9 +173,13 @@ def run(bars: dict[str, pd.DataFrame], cfg: FuturesConfig, strategy: Callable = 
         unreal = sum(p["sign"] * (marks[s] - p["fill"]) * p["qty"] for s, p in pos.items())
         equity = wallet + unreal
         peak = max(peak, equity)
-        latched = halted_on is not None
+        if halt_since is not None and cfg.halt_cooloff_bars is not None and i - halt_since >= cfg.halt_cooloff_bars:
+            halt_since, peak = None, equity                  # the owner reviews and resets: the drawdown reference restarts here
+        latched = halt_since is not None
         if not latched and (peak - equity) / peak >= lim.account_drawdown_halt:
-            halted_on, latched = ts, True
+            halt_since, latched = i, True
+            halts.append(ts)
+            halted_on = halted_on or ts
 
         # ---- entries at this close, each through the real gate
         for s in syms:
@@ -217,12 +224,14 @@ def run(bars: dict[str, pd.DataFrame], cfg: FuturesConfig, strategy: Callable = 
         equity_prev = equity
 
     return FuturesResult(pd.Series(eq, index=idx), pd.DataFrame(trades), rejections, violations, halted_on, liquidated_on, funding_paid, dict(signal_bars),
-                         pd.Series(expo, index=idx), cfg)
+                         pd.Series(expo, index=idx), cfg, halts)
 
 
 # ---------------------------------------------------------------------------------------------------------------- the pre-registered study
 
 PREREG = "docs/preregistration-futures-breakout.md"
+PREREG_RESET = "docs/preregistration-futures-reset.md"
+COOLOFF_BARS = 14 * 24            # the reset study: the owner reviews and resets the halt 14 days after it trips
 VARIANTS = {                      # name: (exposure cap = leverage limit, longs, shorts, description)
     "F0": (3.0, True, False, "long only, up to 3x"),
     "F1": (1.0, True, True, "long and short, no leverage"),
@@ -235,22 +244,24 @@ def what_if_limits(leverage: float) -> L.Limits:
     return L.Limits("what-if", leverage, 0.30, 0.055, "what-if", 0.02, leverage, True)
 
 
-def study(register: bool = True, require_prereg: bool = True, bars: dict | None = None) -> dict:
+def study(register: bool = True, require_prereg: bool = True, bars: dict | None = None, reset: bool = False) -> dict:
     from ..eval import metrics, trials
     from ..eval.channel_ablation import prereg_events, prereg_hash
     from ..eval.data import load_bars
     from ..obs.events import emit
 
-    h = prereg_hash(PREREG) if require_prereg else None
+    prereg, tag = (PREREG_RESET, "G") if reset else (PREREG, "F")
+    h = prereg_hash(prereg) if require_prereg else None
     if require_prereg and h not in {e.get("sha256") for e in prereg_events()}:
-        raise RuntimeError("the futures pre-registration does not match any logged hash: run `getrich preregister docs/preregistration-futures-breakout.md`")
+        raise RuntimeError(f"the futures pre-registration does not match any logged hash: run `getrich preregister {prereg}`")
     bars = bars or {s: load_bars(s, "1h") for s in SYMBOLS}
     runs: dict[str, dict] = {}
     for name, (lev, longs, shorts, _d) in VARIANTS.items():
         lim = what_if_limits(lev)
         runs[name] = {}
         for label, mult, fmult in (("base", 1.0, 1.0), ("2x", 2.0, 1.0), ("stress", 2.0, 3.0)):
-            cfg = FuturesConfig(limits=lim, costs=CostModel().stressed(mult) if mult != 1.0 else CostModel(), funding_8h=FUNDING_8H * fmult)
+            cfg = FuturesConfig(limits=lim, costs=CostModel().stressed(mult) if mult != 1.0 else CostModel(), funding_8h=FUNDING_8H * fmult,
+                                halt_cooloff_bars=COOLOFF_BARS if reset else None)
             runs[name][label] = run(bars, cfg, allow_longs=longs, allow_shorts=shorts)
     first = runs["F2"]["base"].trades["entry"].min().floor("D") if not runs["F2"]["base"].trades.empty else runs["F2"]["base"].equity.index[0]
 
@@ -260,7 +271,7 @@ def study(register: bool = True, require_prereg: bool = True, bars: dict | None 
 
     known = {e["name"] for e in trials.load()}
     base_sh = {k: float(win(runs[k]["base"]).mean() / win(runs[k]["base"]).std(ddof=1)) if win(runs[k]["base"]).std(ddof=1) > 0 else 0.0 for k in VARIANTS}
-    fresh = [v for k, v in base_sh.items() if f"futures-breakout:{k}" not in known]
+    fresh = [v for k, v in base_sh.items() if f"{'futures-breakout-reset' if reset else 'futures-breakout'}:{tag}{k[1:]}" not in known]
     all_trials = trials.period_sharpes() + fresh
     rows = {}
     for k in VARIANTS:
@@ -275,51 +286,61 @@ def study(register: bool = True, require_prereg: bool = True, bars: dict | None 
                    "max_dd": metrics.max_drawdown(rb), "dsr": metrics.deflated_sharpe(rb, all_trials), "half1_2x": metrics.sharpe(r2[r2.index < mid]), "half2_2x": metrics.sharpe(r2[r2.index >= mid]),
                    "short_pnl_2x": short_pnl_2x, "long_pnl_2x": long_pnl_2x, "funding": runs[k]["base"].funding_paid, "fees": float(tr_b["fees"].sum()) if len(tr_b) else 0.0,
                    "exposure": float(runs[k]["base"].exposure[runs[k]["base"].exposure.index >= first].mean()),
-                   "halted": any(runs[k][x].halted_on is not None for x in runs[k]), "halted_on": runs[k]["base"].halted_on, "liquidated": any(runs[k][x].liquidated_on is not None for x in runs[k]),
+                   "halted": any(runs[k][x].halted_on is not None for x in runs[k]), "halted_on": runs[k]["base"].halted_on, "halts": list(runs[k]["base"].halts), "liquidated": any(runs[k][x].liquidated_on is not None for x in runs[k]),
                    "violations": sum(len(runs[k][x].violations) for x in runs[k]), "rejections": dict(runs[k]["base"].rejections), "signals": runs[k]["base"].signal_bars, "years": years}
     f2 = rows["F2"]
-    crit = {"sharpe_2x_at_least_1": f2["sharpe_2x"] >= 1.0, "dsr": f2["dsr"] >= 0.90, "drawdown_and_no_halt": f2["max_dd"] <= 0.30 and not f2["halted"],
+    crit = {"sharpe_2x_at_least_1": f2["sharpe_2x"] >= 1.0, "dsr": f2["dsr"] >= 0.90, "drawdown_and_no_halt": (f2["max_dd"] <= 0.40) if reset else (f2["max_dd"] <= 0.30 and not f2["halted"]),
             "both_halves_positive": f2["half1_2x"] > 0 and f2["half2_2x"] > 0, "funding_stress_positive": f2["sharpe_stress"] > 0, "enough_trades": f2["trades"] >= 150,
             "shorts_carry_weight": f2["short_pnl_2x"] > 0, "clean": f2["violations"] == 0 and not f2["liquidated"]}
     f2["criteria"], f2["shows_value"] = crit, all(crit.values())
     if register:
         for k in VARIANTS:
-            trials.register(4, f"futures-breakout:{k}", rows[k]["sharpe"], "docs/phase5-futures-breakout.md")
-    emit("eval.futures_study_run", service="eval", prereg_sha256=h, n_trials=len(all_trials), shows_value=f2["shows_value"])
-    return {"rows": rows, "prereg": h, "n_trials": len(all_trials), "start": first, "end": runs["F2"]["base"].equity.index[-1]}
+            trials.register(4, f"{'futures-breakout-reset' if reset else 'futures-breakout'}:{tag}{k[1:]}", rows[k]["sharpe"],
+                            "docs/phase5-futures-breakout-reset.md" if reset else "docs/phase5-futures-breakout.md")
+    emit("eval.futures_reset_study_run" if reset else "eval.futures_study_run", service="eval", prereg_sha256=h, n_trials=len(all_trials), shows_value=f2["shows_value"])
+    return {"rows": rows, "reset": reset, "tag": tag, "prereg": h, "n_trials": len(all_trials), "start": first, "end": runs["F2"]["base"].equity.index[-1]}
 
 
 def study_markdown(res: dict) -> str:
-    rows, f2 = res["rows"], res["rows"]["F2"]
+    rows, f2, reset = res["rows"], res["rows"]["F2"], res.get("reset", False)
+    tag = res.get("tag", "F")
+
+    def lab(k):
+        return tag + k[1:]
 
     def pct(x):
         return f"{x * 100:+.1f}%"
 
-    lines = ["# Hourly breakout day trading, long and short, with leverage (pre-registered)", "",
-             f"Pre-registration: `{PREREG}`, SHA-256 `{(res['prereg'] or 'unchecked')[:16]}...` (matches the hash logged before the run). Window {res['start']:%Y-%m-%d} to {res['end']:%Y-%m-%d} on hourly BTCUSDT and ETHUSDT bars; start equity $500; "
+    title = "Hourly breakout day trading with the drawdown halt reset after a cool-off (pre-registered)" if reset else "Hourly breakout day trading, long and short, with leverage (pre-registered)"
+    lines = [f"# {title}", "",
+             f"Pre-registration: `{PREREG_RESET if reset else PREREG}`, SHA-256 `{(res['prereg'] or 'unchecked')[:16]}...` (matches the hash logged before the run). Window {res['start']:%Y-%m-%d} to {res['end']:%Y-%m-%d} on hourly BTCUSDT and ETHUSDT bars; start equity $500; "
              f"what-if limits (30% drawdown halt, 5.5% daily halt, 2% risk per trade; NOT approved). Costs 10 + 5 bps per side (2x also run); funding ASSUMED 0.01% per 8 hours (3x also run). Deflated Sharpe counts {res['n_trials']} trials.", "",
              "| | Trades | Win rate | Avg R | Total | CAGR | Sharpe | at 2x costs | 2x + 3x funding | Max DD | Deflated Sharpe | Avg exposure |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for k, (_lev, _l, _s, desc) in VARIANTS.items():
         r = rows[k]
-        lines.append(f"| {k}: {desc} | {r['trades']} | {r['win_rate']:.0%} | {r['avg_r']:+.2f} | {pct(r['total'])} | {r['cagr'] * 100:.1f}% | {r['sharpe']:.2f} | {r['sharpe_2x']:.2f} | {r['sharpe_stress']:.2f} | {r['max_dd'] * 100:.1f}% | {r['dsr']:.3f} | {r['exposure'] * 100:.0f}% |")
+        lines.append(f"| {lab(k)}: {desc} | {r['trades']} | {r['win_rate']:.0%} | {r['avg_r']:+.2f} | {pct(r['total'])} | {r['cagr'] * 100:.1f}% | {r['sharpe']:.2f} | {r['sharpe_2x']:.2f} | {r['sharpe_stress']:.2f} | {r['max_dd'] * 100:.1f}% | {r['dsr']:.3f} | {r['exposure'] * 100:.0f}% |")
     lines += ["", "## What each part contributed (2x costs, dollars on a $500 start)", "", "| | Long trades P&L | Short trades P&L | Fees (base) | Net funding paid (base) | Halt tripped | Liquidated | Violations |", "|---|---:|---:|---:|---:|---|---|---:|"]
     for k in VARIANTS:
         r = rows[k]
-        lines.append(f"| {k} | {r['long_pnl_2x']:+.0f} | {r['short_pnl_2x']:+.0f} | {r['fees']:.0f} | {r['funding']:+.1f} | {'yes' if r['halted'] else 'no'} | {'yes' if r['liquidated'] else 'no'} | {r['violations']} |")
-    lines += ["", "The drawdown halt latches until the owner resets it (`unhalt`), and this replay never resets it, so after it trips a variant takes no new trades for the rest of the window. "
-              "Halt tripped on (base costs): " + ", ".join(f"{k} {rows[k]['halted_on']:%Y-%m-%d}" if rows[k]["halted_on"] is not None else f"{k} never" for k in VARIANTS) + ". "
-              "Years after that date show 0.0% because nothing was traded, not because the rule was tested and found flat."]
+        lines.append(f"| {lab(k)} | {r['long_pnl_2x']:+.0f} | {r['short_pnl_2x']:+.0f} | {r['fees']:.0f} | {r['funding']:+.1f} | {'yes' if r['halted'] else 'no'} | {'yes' if r['liquidated'] else 'no'} | {r['violations']} |")
+    if reset:
+        lines += ["", f"The 30% drawdown halt trips, blocks new entries for 14 days, then the owner is assumed to review and reset it (peak restarts at the then-current equity). Max DD above is the true one from the all-time peak. "
+                  "Halts (base costs): " + "; ".join(f"{lab(k)} {len(rows[k]['halts'])} ({', '.join(f'{t:%Y-%m-%d}' for t in rows[k]['halts'][:8])}{', ...' if len(rows[k]['halts']) > 8 else ''})" for k in VARIANTS) + "."]
+    else:
+        lines += ["", "The drawdown halt latches until the owner resets it (`unhalt`), and this replay never resets it, so after it trips a variant takes no new trades for the rest of the window. "
+                  "Halt tripped on (base costs): " + ", ".join(f"{lab(k)} {rows[k]['halted_on']:%Y-%m-%d}" if rows[k]["halted_on"] is not None else f"{lab(k)} never" for k in VARIANTS) + ". "
+                  "Years after that date show 0.0% because nothing was traded, not because the rule was tested and found flat."]
     years = sorted({y for r in rows.values() for y in r["years"]})
-    lines += ["", "## By calendar year (base costs)", "", "| Year | " + " | ".join(VARIANTS) + " |", "|---|" + "---:|" * len(VARIANTS)]
+    lines += ["", "## By calendar year (base costs)", "", "| Year | " + " | ".join(lab(k) for k in VARIANTS) + " |", "|---|" + "---:|" * len(VARIANTS)]
     for y in years:
         lines.append(f"| {y} | " + " | ".join(pct(rows[k]["years"].get(y, 0.0)) for k in VARIANTS) + " |")
-    lines += ["", "## Gate rejections of F2 signals (base costs)", "", ", ".join(f"{n}: {c}" for n, c in sorted(rows["F2"]["rejections"].items(), key=lambda kv: -kv[1])) or "none", "",
-              f"Signals seen: {rows['F2']['signals']}.", "", "## Pre-registered criteria for F2", ""]
-    names = {"sharpe_2x_at_least_1": "Sharpe at 2x costs at least 1.0", "dsr": "Deflated Sharpe at least 0.90", "drawdown_and_no_halt": "max drawdown at most 30% and the halt never trips",
+    lines += ["", f"## Gate rejections of {tag}2 signals (base costs)", "", ", ".join(f"{n}: {c}" for n, c in sorted(rows["F2"]["rejections"].items(), key=lambda kv: -kv[1])) or "none", "",
+              f"Signals seen: {rows['F2']['signals']}.", "", f"## Pre-registered criteria for {tag}2", ""]
+    names = {"sharpe_2x_at_least_1": "Sharpe at 2x costs at least 1.0", "dsr": "Deflated Sharpe at least 0.90", "drawdown_and_no_halt": "true max drawdown at most 40%" if reset else "max drawdown at most 30% and the halt never trips",
              "both_halves_positive": "Sharpe at 2x costs positive in both halves", "funding_stress_positive": "Sharpe positive at 2x costs with 3x funding", "enough_trades": "at least 150 trades",
              "shorts_carry_weight": "short trades profitable at 2x costs", "clean": "no violations, no liquidation"}
     for k, ok in f2["criteria"].items():
         lines.append(f"- {'PASS' if ok else 'FAIL'}: {names[k]}")
-    lines += ["", f"**Verdict: F2 {'SHOWS VALUE' if f2['shows_value'] else 'NOT SHOWN'}.**", "",
+    lines += ["", f"**Verdict: {tag}2 {'SHOWS VALUE' if f2['shows_value'] else 'NOT SHOWN'}.**", "",
               "Caveats: one in-sample path; funding and maintenance margin are assumptions; perpetual basis ignored; fills at the close or the stop level with no queue or partial fills; a gap through a stop is the loss leverage multiplies and no stop can prevent."]
     return "\n".join(lines) + "\n"

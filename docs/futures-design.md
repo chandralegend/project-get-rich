@@ -17,3 +17,7 @@ Round-trip cost is 30 bps and the cost gate allows at most 0.25R, so stops under
 ## Still needed before any of this could go live
 
 A margin broker (Binance futures testnet adapter, margin and funding in the book), real funding history (a download that needs the owner's approval), the owner's explicit approval of leverage and shorting in `limits.toml`, and a testnet run only after the owner is satisfied with the local system. Access to futures from Sri Lanka is the owner's call.
+
+## First two results (2026-11-15)
+
+Both pre-registered, both "not shown" (`docs/phase5-futures-breakout.md`, `docs/phase5-futures-breakout-reset.md`). With the halt latched for good, the long/short 3x variant stopped trading in July 2020; with the owner resetting it after 14 days it kept trading through 2026 and lost most of the account (-96% total, 23 halts, true maximum drawdown 99%). The latched version looked milder only because it stopped trading. Halts and stops limit how fast an account can fall, not whether a rule with no edge loses to costs.

@@ -190,6 +190,8 @@ def main(argv: list[str] | None = None) -> int:
     rvt.add_argument("--write", action="store_true")
     rfs = sub.add_parser("replay-futures-study", help="run the PRE-REGISTERED hourly breakout study (long and short, leverage, funding, liquidation) through the real gate; writes docs/phase5-futures-breakout.md")
     rfs.add_argument("--no-register", action="store_true", help="do not add the variants to the trial registry (dry run)")
+    rfr = sub.add_parser("replay-futures-reset-study", help="run the PRE-REGISTERED follow-up where the owner resets the drawdown halt 14 days after it trips; writes docs/phase5-futures-breakout-reset.md")
+    rfr.add_argument("--no-register", action="store_true", help="do not add the variants to the trial registry (dry run)")
     rvs = sub.add_parser("replay-voltarget-study", help="run the PRE-REGISTERED comparison of entering the gated vol-scaled strategy at 1 of 3 versus 2 of 3 votes; writes docs/phase4-voltarget-entry.md")
     rvs.add_argument("--no-register", action="store_true")
     ps = sub.add_parser("portfolio-study", help="run the PRE-REGISTERED wider-universe trend and momentum study; writes docs/portfolio-study.md")
@@ -305,6 +307,15 @@ def main(argv: list[str] | None = None) -> int:
         print(text)
         (config.root() / "docs" / "phase5-futures-breakout.md").write_text(text)
         print("wrote docs/phase5-futures-breakout.md")
+        return 0
+    if args.cmd == "replay-futures-reset-study":
+        from .trading import replay_futures
+
+        res = replay_futures.study(register=not args.no_register, reset=True)
+        text = replay_futures.study_markdown(res)
+        print(text)
+        (config.root() / "docs" / "phase5-futures-breakout-reset.md").write_text(text)
+        print("wrote docs/phase5-futures-breakout-reset.md")
         return 0
     if args.cmd == "portfolio-study":
         from .eval import portfolio_study
