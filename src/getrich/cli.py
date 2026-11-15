@@ -183,11 +183,12 @@ def main(argv: list[str] | None = None) -> int:
     nf.add_argument("--refresh", action="store_true", help="refetch series that are already cached")
     ns = sub.add_parser("news-study", help="exploratory: do the daily GDELT news features line up with forward BTC/ETH returns at all? writes docs/news-study.md with --write")
     ns.add_argument("--write", action="store_true")
+    ns.add_argument("--partial", action="store_true", help="use whichever GDELT series are cached (exploratory)")
     pr = sub.add_parser("preregister", help="log the SHA-256 of a pre-registration file so later edits are visible; the experiment refuses to run on an unlogged file")
     pr.add_argument("file", nargs="?", default="docs/preregistration-news-forecast.md")
     pt = sub.add_parser("pinet-train", help="EXPLORATORY: train the PI-Net with a selected forecaster and/or news channel, compare with the baseline on identical rows (CPCV + strategy backtest); not registered")
     pt.add_argument("--forecaster", choices=["chronos2", "timesfm25", "kronos_small", "none"], default="chronos2", help="pretrained forecaster whose cached forecasts become a channel")
-    pt.add_argument("--news", choices=["gdelt", "none"], default="gdelt", help="news channel")
+    pt.add_argument("--news", choices=["gdelt", "gdelt-partial", "none"], default="gdelt", help="news channel; gdelt-partial uses whichever series are cached (exploratory)")
     pt.add_argument("--models", default="lgbm", help="comma-separated: linear, lgbm, fusion")
     pt.add_argument("--null", type=int, default=0, help="shift-null draws per run (0 = skip)")
     pt.add_argument("--save", action="store_true", help="also fit a final model on all rows and save it under data/models/pinet/")
@@ -253,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "news-study":
         from .news import study
 
-        res = study.run()
+        res = study.run(partial=args.partial)
         text = study.to_markdown(res)
         print(text)
         if args.write:

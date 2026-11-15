@@ -109,7 +109,7 @@ def main(argv=None) -> int:
     p.add_argument("--epochs", type=int)
     p.add_argument("--meta", action="store_true", help="meta-label experiment: trend-entry days, 4/2 sigma, 20-day horizon")
     p.add_argument("--foundation", help="pretrained forecaster whose cached forecasts become the 'foundation' channel (e.g. chronos2)")
-    p.add_argument("--news", choices=["gdelt"], help="add the daily GDELT news features as the 'news' channel")
+    p.add_argument("--news", choices=["gdelt", "gdelt-partial"], help="add the daily GDELT news features as the 'news' channel")
     p.add_argument("--channels", help="comma-separated channels the model may use, e.g. market,forecast,context,news")
     p.add_argument("--save", help="also fit a final model on all rows and pickle it to this path")
     a = p.parse_args(argv)

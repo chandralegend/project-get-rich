@@ -38,10 +38,10 @@ def study_frame(feats: pd.DataFrame, close: pd.Series, h: int, symbol: str, reps
     return rows
 
 
-def run(symbols=("BTCUSDT", "ETHUSDT"), horizons=HORIZONS, reps: int = 400) -> dict:
+def run(symbols=("BTCUSDT", "ETHUSDT"), horizons=HORIZONS, reps: int = 400, partial: bool = False) -> dict:
     from ..eval.features import news_frame
 
-    feats = news_frame("gdelt")
+    feats = news_frame("gdelt-partial" if partial else "gdelt")
     rows = []
     for s in symbols:
         close = load_bars(s, "1d")["close"]
@@ -53,13 +53,13 @@ def run(symbols=("BTCUSDT", "ETHUSDT"), horizons=HORIZONS, reps: int = 400) -> d
     tested = [r for r in rows if r["ic"] == r["ic"]]
     nsig = sum(r["significant"] for r in tested)
     return {"rows": rows, "tested": len(tested), "significant": nsig, "expected_by_chance": 0.05 * len(tested),
-            "from": str(feats.index.min().date()), "to": str(feats.index.max().date())}
+            "from": str(feats.index.min().date()), "to": str(feats.index.max().date()), "features": list(feats.columns), "partial": partial}
 
 
 def to_markdown(res: dict) -> str:
     rows = res["rows"]
     L = ["# News features versus forward returns (exploratory event study)", "",
-         f"GDELT daily features {res['from']} to {res['to']}. {res['tested']} tests (feature x symbol x horizon); {res['significant']} have a 95% block-bootstrap "
+         f"GDELT daily features {res['from']} to {res['to']}" + (f" (partial: {len(res['features'])} of 16 features, those cached when this ran)" if res.get("partial") else "") + f". {res['tested']} tests (feature x symbol x horizon); {res['significant']} have a 95% block-bootstrap "
          f"interval that excludes zero, against about {res['expected_by_chance']:.1f} expected by chance alone. This is exploratory and not a trading claim; "
          "the pre-registered experiment is the confirmatory test.", ""]
     L += ["| feature | symbol | horizon | n | rank IC | 95% interval | excludes 0 |", "|---|---|---:|---:|---:|---|---|"]

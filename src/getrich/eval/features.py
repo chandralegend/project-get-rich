@@ -152,12 +152,13 @@ def foundation_frame(symbol: str, daily: pd.DataFrame, models: list[str]) -> pd.
 
 
 def news_frame(source: str = "gdelt") -> pd.DataFrame:
-    """The causal daily news features. Only GDELT exists; anything else raises rather than silently returning nothing."""
-    if source != "gdelt":
-        raise ValueError(f"unknown news source {source!r}; only 'gdelt' exists")
+    """The causal daily news features. "gdelt" needs every series cached (the pre-registered experiment uses only this);
+    "gdelt-partial" uses whichever series are cached and is for exploratory runs. Anything else raises."""
+    if source not in ("gdelt", "gdelt-partial"):
+        raise ValueError(f"unknown news source {source!r}; only 'gdelt' and 'gdelt-partial' exist")
     from ..news import gdelt_timeline
 
-    daily, _info = gdelt_timeline.load_daily()
+    daily, _info = gdelt_timeline.load_daily(partial=source == "gdelt-partial")
     return gdelt_timeline.news_features(daily)
 
 

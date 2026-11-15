@@ -112,6 +112,8 @@ def judge(row: dict, ref_2x: float, alone_2x: float, p_value: float) -> dict:
 
 def run(foundation: str = "chronos2", news: str = "gdelt", models: tuple[str, ...] = MODELS, null_counts: dict[str, int] | None = None,
         cost: CostModel | None = None, register: bool = True, require_prereg: bool = True) -> dict:
+    if news != "gdelt":
+        raise RuntimeError("the pre-registered experiment needs the complete GDELT set ('gdelt'); 'gdelt-partial' is for exploratory runs only")
     cost = cost or CostModel()
     null_counts = null_counts or DEFAULT_NULLS
     h = prereg_hash() if require_prereg else None

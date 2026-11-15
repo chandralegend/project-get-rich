@@ -117,24 +117,29 @@ def fetch_all(*, refresh: bool = False, end: str | None = None, client: httpx.Cl
     return {"fetched": done, "cached": skipped}
 
 
-def load_daily(end: str | None = None) -> tuple[pd.DataFrame, dict]:
+def load_daily(end: str | None = None, partial: bool = False) -> tuple[pd.DataFrame, dict]:
     """Daily frame, one row per UTC day, columns `<series>_vol` and `<series>_tone`. Missing days are filled forward from the past
     for at most MAX_FFILL_DAYS (never from the future); anything still missing stays NaN. Returns (frame, info about gaps)."""
-    cols = {}
+    cols, missing_series = {}, []
     for name in SERIES:
         for mode in MODES:
             p = cache_path(name, mode)
+            if not p.exists() and partial:
+                missing_series.append(f"{name}/{mode}")
+                continue
             if not p.exists():
                 raise RuntimeError(f"no cached GDELT series for {name}/{mode}: run `getrich news-fetch`")
             d = json.loads(p.read_text())["data"]
             cols[f"{name}_{mode}"] = pd.Series({pd.Timestamp(day, tz="UTC"): v for day, v in d})
+    if not cols:
+        raise RuntimeError("no cached GDELT series at all: run `getrich news-fetch`")
     raw = pd.DataFrame(cols).sort_index()
     full = pd.date_range(raw.index.min(), raw.index.max(), freq="D", tz="UTC")
     frame = raw.reindex(full)
     missing = int(frame.isna().all(axis=1).sum())
     frame = frame.ffill(limit=MAX_FFILL_DAYS)
     info = {"days": len(full), "days_missing_all_series": missing, "still_missing_after_fill": int(frame.isna().any(axis=1).sum()),
-            "from": str(full[0].date()), "to": str(full[-1].date())}
+            "from": str(full[0].date()), "to": str(full[-1].date()), "missing_series": missing_series}
     return frame, info
 
 
@@ -144,6 +149,8 @@ def news_features(daily: pd.DataFrame, window: int = WINDOW) -> pd.DataFrame:
     out = {}
     for name in SERIES:
         for mode, tag in (("vol", "vz"), ("tone", "tz")):
+            if f"{name}_{mode}" not in daily.columns:      # a partial (exploratory) load leaves uncached series out
+                continue
             s = daily[f"{name}_{mode}"]
             mu, sd = s.rolling(window, min_periods=30).mean(), s.rolling(window, min_periods=30).std()
             z = (s - mu) / sd.replace(0, np.nan)

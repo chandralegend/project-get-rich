@@ -109,3 +109,25 @@ def test_network_timeout_is_retried_like_a_rate_limit():
     client = httpx.Client(transport=httpx.MockTransport(handler))
     out = g.fetch_one(client, "btc", "vol", "20240201000000", sleep=sleeps.append)
     assert calls["n"] == 2 and sleeps == [90.0] and len(out) == 1
+
+
+def test_partial_load_uses_only_cached_series_and_says_which_are_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(g, "cache_dir", lambda: tmp_path)
+    days = pd.date_range("2024-01-01", periods=120, freq="D")
+    for name in ("btc", "eth"):
+        for mode in ("vol", "tone"):
+            g.cache_path(name, mode).write_text(json.dumps({"data": [(d.strftime("%Y%m%d"), float(i % 7 + 1)) for i, d in enumerate(days)]}))
+    with pytest.raises(RuntimeError, match="news-fetch"):
+        g.load_daily()                                              # strict mode refuses an incomplete set
+    daily, info = g.load_daily(partial=True)
+    assert set(daily.columns) == {"btc_vol", "btc_tone", "eth_vol", "eth_tone"}
+    assert "hack/vol" in info["missing_series"] and len(info["missing_series"]) == 12
+    f = g.news_features(daily)
+    assert list(f.columns) == ["news_btc_vz", "news_btc_tz", "news_eth_vz", "news_eth_tz"]
+
+
+def test_strict_experiment_refuses_partial_news():
+    from getrich.eval import channel_ablation
+
+    with pytest.raises(RuntimeError, match="complete GDELT"):
+        channel_ablation.run(news="gdelt-partial")
