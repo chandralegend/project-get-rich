@@ -250,5 +250,23 @@
     "name": "futures-breakout-reset:G2",
     "sharpe_annual": -0.5208,
     "source": "docs/phase5-futures-breakout-reset.md"
+  },
+  {
+    "phase": 4,
+    "name": "futures-reversion:H0",
+    "sharpe_annual": -1.9737,
+    "source": "docs/phase5-futures-reversion.md"
+  },
+  {
+    "phase": 4,
+    "name": "futures-reversion:H1",
+    "sharpe_annual": -2.4678,
+    "source": "docs/phase5-futures-reversion.md"
+  },
+  {
+    "phase": 4,
+    "name": "futures-reversion:H2",
+    "sharpe_annual": -2.2248,
+    "source": "docs/phase5-futures-reversion.md"
   }
 ]

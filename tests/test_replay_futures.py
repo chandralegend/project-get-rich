@@ -162,3 +162,36 @@ def test_entries_inside_the_cooloff_are_still_blocked():
     c, strat = _two_entries_around_a_crash()
     r = rf.run({"BTCUSDT": bars(c)}, cfg(limits=lim(account_drawdown_halt=0.04, risk_per_trade=0.05), halt_cooloff_bars=500), strat)
     assert len(r.trades) == 1 and r.rejections["halt_latch"] >= 1
+
+
+def test_reversion_goes_long_after_a_stretch_down_and_short_after_a_stretch_up_with_the_mean_as_target():
+    base = [100.0] * 60
+    down = bars(base + [100, 99, 97, 95, 93] + [93] * 5)
+    d, stop, tgt = rf.reversion_signals(down)
+    assert (d == 1).any() and (d == -1).sum() == 0
+    i = int(np.flatnonzero(d.to_numpy() == 1)[0])
+    assert tgt.iloc[i] > 0.01 and stop.iloc[i] >= rf.STOP_FLOOR
+    up = bars(base + [100, 101, 103, 105, 107] + [107] * 5)
+    d2, _s, _t = rf.reversion_signals(up)
+    assert (d2 == -1).any() and (d2 == 1).sum() == 0
+
+
+def test_reversion_skips_a_stretch_whose_target_is_too_close_and_uses_only_past_data():
+    rng = np.random.default_rng(3)
+    c = 100 * np.exp(np.cumsum(rng.normal(0, 0.003, 400)))
+    full = rf.reversion_signals(bars(c))
+    cut = rf.reversion_signals(bars(c[:250]))
+    assert (full[0].iloc[:250].to_numpy() == cut[0].to_numpy()).all()
+    d, _s, t = full
+    assert (t[d != 0] >= 0.01 - 1e-12).all()
+
+
+def test_a_rule_can_supply_its_own_take_profit_distance_and_the_engine_uses_it():
+    def strat(px):
+        d = pd.Series(0, index=px.index)
+        d.iloc[3] = -1
+        return d, pd.Series(0.02, index=px.index), pd.Series(0.05, index=px.index)
+    closes = [100] * 4 + list(np.linspace(100, 90, 8)) + [90] * 8
+    r = rf.run({"BTCUSDT": bars(closes)}, cfg(), strat)
+    t = r.trades.iloc[0]
+    assert t["kind"] == "take_profit" and t["exit_px"] == pytest.approx(95.0 * (1 + 0.0005), rel=0.002)

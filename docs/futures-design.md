@@ -21,3 +21,5 @@ A margin broker (Binance futures testnet adapter, margin and funding in the book
 ## First two results (2026-11-15)
 
 Both pre-registered, both "not shown" (`docs/phase5-futures-breakout.md`, `docs/phase5-futures-breakout-reset.md`). With the halt latched for good, the long/short 3x variant stopped trading in July 2020; with the owner resetting it after 14 days it kept trading through 2026 and lost most of the account (-96% total, 23 halts, true maximum drawdown 99%). The latched version looked milder only because it stopped trading. Halts and stops limit how fast an account can fall, not whether a rule with no edge loses to costs.
+
+Mean reversion (`docs/phase5-futures-reversion.md`, pre-registered, also "not shown"): fading 2.5-sigma stretches on hourly bars lost 99% in all three variants. A raw check of the signals (not a new trial) shows why: the average 24-hour move after a long signal is +0.02% (BTC) and -0.02% (ETH), and after a short signal the price keeps rising, so shorts lose 0.4% to 0.55% per signal over 24 hours before costs. There is no reversion to harvest at this horizon, only costs.

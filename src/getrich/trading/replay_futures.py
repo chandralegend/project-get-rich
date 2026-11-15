@@ -92,6 +92,22 @@ def breakout_signals(px: pd.DataFrame, lookback: int = 24, fast: int = 12, slow:
     return direction, stop
 
 
+def reversion_signals(px: pd.DataFrame, window: int = 48, entry_z: float = 2.5, atr_n: int = 24, atr_mult: float = 3.0, min_target: float = 0.01) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """(direction, stop distance, take-profit distance), both as fractions of price, decided at each bar's close from data up to and including that bar.
+    Long when the close is entry_z standard deviations or more below its trailing `window`-bar mean, short when that far above. The target is the mean
+    itself; trades whose target is closer than `min_target` are skipped. The stop is atr_mult times the average true range, never tighter than STOP_FLOOR."""
+    c, h, l = px["close"], px["high"], px["low"]
+    mu, sd = c.rolling(window).mean(), c.rolling(window).std()
+    z = (c - mu) / sd.replace(0, np.nan)
+    target = (mu - c).abs() / c
+    tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
+    atr = tr.rolling(atr_n).mean()
+    direction = pd.Series(0, index=px.index).mask(z <= -entry_z, 1).mask(z >= entry_z, -1)
+    direction[z.isna() | atr.isna() | (target < min_target)] = 0
+    stop = (atr_mult * atr / c).clip(lower=STOP_FLOOR)
+    return direction, stop, target
+
+
 # ---------------------------------------------------------------------------------------------------------------- the engine
 
 def run(bars: dict[str, pd.DataFrame], cfg: FuturesConfig, strategy: Callable = breakout_signals, allow_longs: bool = True, allow_shorts: bool = True) -> FuturesResult:
@@ -194,7 +210,10 @@ def run(bars: dict[str, pd.DataFrame], cfg: FuturesConfig, strategy: Callable = 
                 positions={k: Position(k, q["qty"], q["fill"], q["stop"], q["tp"], "r", q["day"], "long" if q["sign"] > 0 else "short") for k, q in pos.items()},
                 prices={k: (marks[k], 0.0, "1h") for k in syms}, halt_latched=latched, limits_ok=True)
             stop_px = c * (1 - sf) if d > 0 else c * (1 + sf)
-            tp_px = c * (1 + cfg.rr * sf) if d > 0 else c * (1 - cfg.rr * sf)
+            tpf = float(sig[s][2].iloc[i]) if len(sig[s]) > 2 else cfg.rr * sf          # a rule may supply its own target distance
+            if not np.isfinite(tpf) or tpf <= 0:
+                continue
+            tp_px = c * (1 + tpf) if d > 0 else c * (1 - tpf)
             intent = OrderIntent(s, "buy" if d > 0 else "short", stop_price=stop_px, take_profit=tp_px, source="futures_replay")
             verdict = evaluate(intent, state, lim, costs=cfg.costs)
             if not verdict.approved:
@@ -231,6 +250,7 @@ def run(bars: dict[str, pd.DataFrame], cfg: FuturesConfig, strategy: Callable = 
 
 PREREG = "docs/preregistration-futures-breakout.md"
 PREREG_RESET = "docs/preregistration-futures-reset.md"
+PREREG_REVERSION = "docs/preregistration-futures-reversion.md"
 COOLOFF_BARS = 14 * 24            # the reset study: the owner reviews and resets the halt 14 days after it trips
 VARIANTS = {                      # name: (exposure cap = leverage limit, longs, shorts, description)
     "F0": (3.0, True, False, "long only, up to 3x"),
@@ -239,18 +259,31 @@ VARIANTS = {                      # name: (exposure cap = leverage limit, longs,
 }
 
 
+def kind_spec(kind: str, reset: bool) -> dict:
+    """Everything that differs between the studies: which rule, which pre-registration, which labels and trial names."""
+    if kind == "reversion":
+        return {"prereg": PREREG_REVERSION, "tag": "H", "prefix": "futures-reversion", "doc": "docs/phase5-futures-reversion.md", "strategy": reversion_signals, "horizon": 24, "cooloff": COOLOFF_BARS,
+                "title": "Hourly mean-reversion day trading, long and short, with leverage (pre-registered)", "event": "eval.futures_reversion_study_run", "reset": True, "cli": "replay-futures-reversion-study"}
+    if reset:
+        return {"prereg": PREREG_RESET, "tag": "G", "prefix": "futures-breakout-reset", "doc": "docs/phase5-futures-breakout-reset.md", "strategy": breakout_signals, "horizon": 48, "cooloff": COOLOFF_BARS,
+                "title": "Hourly breakout day trading with the drawdown halt reset after a cool-off (pre-registered)", "event": "eval.futures_reset_study_run", "reset": True, "cli": "replay-futures-reset-study"}
+    return {"prereg": PREREG, "tag": "F", "prefix": "futures-breakout", "doc": "docs/phase5-futures-breakout.md", "strategy": breakout_signals, "horizon": 48, "cooloff": None,
+            "title": "Hourly breakout day trading, long and short, with leverage (pre-registered)", "event": "eval.futures_study_run", "reset": False, "cli": "replay-futures-study"}
+
+
 def what_if_limits(leverage: float) -> L.Limits:
     """The study's limits: NOT approved by the owner, never written to config/limits.toml."""
     return L.Limits("what-if", leverage, 0.30, 0.055, "what-if", 0.02, leverage, True)
 
 
-def study(register: bool = True, require_prereg: bool = True, bars: dict | None = None, reset: bool = False) -> dict:
+def study(register: bool = True, require_prereg: bool = True, bars: dict | None = None, reset: bool = False, kind: str = "breakout") -> dict:
     from ..eval import metrics, trials
     from ..eval.channel_ablation import prereg_events, prereg_hash
     from ..eval.data import load_bars
     from ..obs.events import emit
 
-    prereg, tag = (PREREG_RESET, "G") if reset else (PREREG, "F")
+    spec = kind_spec(kind, reset)
+    prereg, tag, reset = spec["prereg"], spec["tag"], spec["reset"]
     h = prereg_hash(prereg) if require_prereg else None
     if require_prereg and h not in {e.get("sha256") for e in prereg_events()}:
         raise RuntimeError(f"the futures pre-registration does not match any logged hash: run `getrich preregister {prereg}`")
@@ -261,8 +294,8 @@ def study(register: bool = True, require_prereg: bool = True, bars: dict | None 
         runs[name] = {}
         for label, mult, fmult in (("base", 1.0, 1.0), ("2x", 2.0, 1.0), ("stress", 2.0, 3.0)):
             cfg = FuturesConfig(limits=lim, costs=CostModel().stressed(mult) if mult != 1.0 else CostModel(), funding_8h=FUNDING_8H * fmult,
-                                halt_cooloff_bars=COOLOFF_BARS if reset else None)
-            runs[name][label] = run(bars, cfg, allow_longs=longs, allow_shorts=shorts)
+                                halt_cooloff_bars=spec["cooloff"], horizon_bars=spec["horizon"])
+            runs[name][label] = run(bars, cfg, spec["strategy"], allow_longs=longs, allow_shorts=shorts)
     first = runs["F2"]["base"].trades["entry"].min().floor("D") if not runs["F2"]["base"].trades.empty else runs["F2"]["base"].equity.index[0]
 
     def win(r: FuturesResult) -> pd.Series:
@@ -271,7 +304,7 @@ def study(register: bool = True, require_prereg: bool = True, bars: dict | None 
 
     known = {e["name"] for e in trials.load()}
     base_sh = {k: float(win(runs[k]["base"]).mean() / win(runs[k]["base"]).std(ddof=1)) if win(runs[k]["base"]).std(ddof=1) > 0 else 0.0 for k in VARIANTS}
-    fresh = [v for k, v in base_sh.items() if f"{'futures-breakout-reset' if reset else 'futures-breakout'}:{tag}{k[1:]}" not in known]
+    fresh = [v for k, v in base_sh.items() if f"{spec['prefix']}:{tag}{k[1:]}" not in known]
     all_trials = trials.period_sharpes() + fresh
     rows = {}
     for k in VARIANTS:
@@ -295,10 +328,9 @@ def study(register: bool = True, require_prereg: bool = True, bars: dict | None 
     f2["criteria"], f2["shows_value"] = crit, all(crit.values())
     if register:
         for k in VARIANTS:
-            trials.register(4, f"{'futures-breakout-reset' if reset else 'futures-breakout'}:{tag}{k[1:]}", rows[k]["sharpe"],
-                            "docs/phase5-futures-breakout-reset.md" if reset else "docs/phase5-futures-breakout.md")
-    emit("eval.futures_reset_study_run" if reset else "eval.futures_study_run", service="eval", prereg_sha256=h, n_trials=len(all_trials), shows_value=f2["shows_value"])
-    return {"rows": rows, "reset": reset, "tag": tag, "prereg": h, "n_trials": len(all_trials), "start": first, "end": runs["F2"]["base"].equity.index[-1]}
+            trials.register(4, f"{spec['prefix']}:{tag}{k[1:]}", rows[k]["sharpe"], spec["doc"])
+    emit(spec["event"], service="eval", prereg_sha256=h, n_trials=len(all_trials), shows_value=f2["shows_value"])
+    return {"rows": rows, "reset": reset, "tag": tag, "kind": kind, "spec": spec, "prereg": h, "n_trials": len(all_trials), "start": first, "end": runs["F2"]["base"].equity.index[-1]}
 
 
 def study_markdown(res: dict) -> str:
@@ -311,9 +343,9 @@ def study_markdown(res: dict) -> str:
     def pct(x):
         return f"{x * 100:+.1f}%"
 
-    title = "Hourly breakout day trading with the drawdown halt reset after a cool-off (pre-registered)" if reset else "Hourly breakout day trading, long and short, with leverage (pre-registered)"
+    title = res["spec"]["title"] if "spec" in res else ("Hourly breakout day trading with the drawdown halt reset after a cool-off (pre-registered)" if reset else "Hourly breakout day trading, long and short, with leverage (pre-registered)")
     lines = [f"# {title}", "",
-             f"Pre-registration: `{PREREG_RESET if reset else PREREG}`, SHA-256 `{(res['prereg'] or 'unchecked')[:16]}...` (matches the hash logged before the run). Window {res['start']:%Y-%m-%d} to {res['end']:%Y-%m-%d} on hourly BTCUSDT and ETHUSDT bars; start equity $500; "
+             f"Pre-registration: `{res['spec']['prereg'] if 'spec' in res else (PREREG_RESET if reset else PREREG)}`, SHA-256 `{(res['prereg'] or 'unchecked')[:16]}...` (matches the hash logged before the run). Window {res['start']:%Y-%m-%d} to {res['end']:%Y-%m-%d} on hourly BTCUSDT and ETHUSDT bars; start equity $500; "
              f"what-if limits (30% drawdown halt, 5.5% daily halt, 2% risk per trade; NOT approved). Costs 10 + 5 bps per side (2x also run); funding ASSUMED 0.01% per 8 hours (3x also run). Deflated Sharpe counts {res['n_trials']} trials.", "",
              "| | Trades | Win rate | Avg R | Total | CAGR | Sharpe | at 2x costs | 2x + 3x funding | Max DD | Deflated Sharpe | Avg exposure |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for k, (_lev, _l, _s, desc) in VARIANTS.items():
