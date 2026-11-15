@@ -157,7 +157,7 @@ def to_markdown(res: dict, recommended: str | None = None) -> str:
     return "\n".join(L)
 
 
-def to_toml(res: dict, profile: str, approved: bool = False) -> str:
+def to_toml(res: dict, profile: str, approved: bool = False, risk_per_trade: float | None = None) -> str:
     p = res["profiles"][profile]
     header = (
         "# APPROVED by the owner. The Phase 4 risk gate will load and hash-pin this file. Change it only by approving again.\n"
@@ -170,6 +170,7 @@ def to_toml(res: dict, profile: str, approved: bool = False) -> str:
         f"max_exposure_fraction = {p['exposure_cap']}\n"
         f"account_drawdown_halt = {p['proposed_account_drawdown_halt']:.2f}\n"
         f"daily_loss_halt = {p['proposed_daily_loss_halt']:.3f}\n"
+        + (f"risk_per_trade = {risk_per_trade}\n" if risk_per_trade is not None else "") +
         f"derived_from_days = {res['sample_days']}\n"
         f"derived_from_range = \"{res['start']} to {res['end']}\"\n"
     )

@@ -72,7 +72,7 @@ def to_markdown(out: dict) -> str:
     for label, d in out["runs"].items():
         rr: ReplayResult = d["result"]
         L_.append(f"- **{label}:** {len(rr.violations)} invariant violations over {len(rr.trades)} trades "
-                  f"(at entry: risk per trade at most {L.RISK_PER_TRADE:.1%} of equity, exposure at most {lim.max_exposure_fraction:.0%}, whole exchange steps, minimum size, cash never negative, nothing opened under a halt)."
+                  f"(at entry: risk per trade at most {lim.risk_per_trade:.1%} of equity, exposure at most {lim.max_exposure_fraction:.0%}, whole exchange steps, minimum size, cash never negative, nothing opened under a halt)."
                   + (f" First: {rr.violations[0]}" if rr.violations else "") + (f" Drawdown halt tripped on {rr.halted_on:%Y-%m-%d}." if rr.halted_on is not None else " The drawdown halt never tripped."))
     L_.append(f"- The exposure cap binds when a position is opened and positions are not trimmed afterwards, so a winner drifts above it: the marked exposure peaked at {r.exposure.max():.1%} of equity. "
               f"The worst single trade lost {(t.r.min() if len(t) else 0):.2f} R (a gap through a stop loses more than the risk budget).")
@@ -92,7 +92,7 @@ def to_markdown(out: dict) -> str:
             L_.append(f"| {name} | {s['total']:+.1%} | {s['cagr']:+.1%} | {s['sharpe']:.2f} | {s['max_drawdown']:.1%} | {s['worst_day']:+.1%} | "
                       + (f"{s['sharpe'] - bh_sharpe[label]:+.2f} |" if name.startswith("gated") else "|"))
     L_ += ["", "Sharpe does not depend on how much is invested, so it compares the gated rule with the full-size baselines fairly. "
-           "Total return and drawdown do not: the approved limits cap the gated rule at 0.5% of equity at risk per trade and 20% invested, so its return is small by design.", ""]
+           "Total return and drawdown do not: the approved limits cap the gated rule's risk per trade and total exposure, so its return is small by design.", ""]
     if len(t):
         gross_win, gross_loss = t.loc[t.pnl > 0, "pnl"].sum(), -t.loc[t.pnl <= 0, "pnl"].sum()
         L_ += ["## Trades (base costs)", "",

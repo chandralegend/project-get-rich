@@ -14,7 +14,7 @@ LIMITS_TOML = 'profile = "minimal"\nmax_exposure_fraction = 0.2\naccount_drawdow
 
 
 def make_limits(**over):
-    return L.Limits("minimal", over.get("exposure", 0.2), over.get("dd", 0.15), over.get("daily", 0.025), "x")
+    return L.Limits("minimal", over.get("exposure", 0.2), over.get("dd", 0.15), over.get("daily", 0.025), "x", over.get("risk", L.RISK_PER_TRADE))
 
 
 def state(**over):
@@ -338,3 +338,27 @@ def test_cli_approval_refuses_without_an_interactive_terminal(ready, capsys, mon
     monkeypatch.setattr("sys.stdin.isatty", lambda: False, raising=False)
     assert cli.main(["approve", oid]) == 2
     assert book.get_order(oid)["status"] == "proposed" and "interactive terminal" in capsys.readouterr().out
+
+
+def test_risk_per_trade_comes_from_the_pinned_limits_and_scales_the_size():
+    base = gate.evaluate(buy(), state(), make_limits(exposure=1.0))
+    double = gate.evaluate(buy(), state(), make_limits(exposure=1.0, risk=0.01))
+    assert double.risk_amount == pytest.approx(2 * base.risk_amount, rel=0.02)
+    assert double.risk_amount <= 500 * 0.01 + 1e-9
+
+
+def test_a_limits_file_carries_risk_per_trade_and_rejects_nonsense(tmp_path, monkeypatch):
+    monkeypatch.setattr(L, "limits_path", lambda: tmp_path / "limits.toml")
+    monkeypatch.setattr(L, "pin_path", lambda: tmp_path / "limits.pin")
+    body = 'profile = "moderate"\nmax_exposure_fraction = 0.5\naccount_drawdown_halt = 0.3\ndaily_loss_halt = 0.055\n'
+    (tmp_path / "limits.toml").write_text(body + "risk_per_trade = 0.02\n")
+    L.pin()
+    lim, why = L.load()
+    assert lim is not None and lim.risk_per_trade == 0.02 and why == ""
+    (tmp_path / "limits.toml").write_text(body)                                   # an older file without the field keeps the default
+    L.pin()
+    assert L.load()[0].risk_per_trade == L.RISK_PER_TRADE
+    (tmp_path / "limits.toml").write_text(body + "risk_per_trade = 0.5\n")       # 50% per trade is refused
+    L.pin()
+    lim, why = L.load()
+    assert lim is None and "outside their allowed range" in why

@@ -114,7 +114,7 @@ def evaluate(intent: OrderIntent, state: PortfolioState, limits: L.Limits | None
         return v
 
     # sizing: the smallest of every constraint, never above the request
-    risk_frac = min(L.RISK_PER_TRADE, intent.risk_fraction) if intent.risk_fraction else L.RISK_PER_TRADE
+    risk_frac = min(limits.risk_per_trade, intent.risk_fraction) if intent.risk_fraction else limits.risk_per_trade
     risk_budget = state.equity * risk_frac
     caps = {"risk budget": risk_budget / (price - stop),
             "exposure cap": (limits.max_exposure_fraction * state.equity - state.exposure) / price,

@@ -14,7 +14,8 @@ from pathlib import Path
 from .. import config
 
 # Starting points from ARCHITECTURE.md 4.4. They are conservative defaults the owner can tighten (and loosen only by editing here and in docs).
-RISK_PER_TRADE = 0.005        # 0.5% of equity at risk if the stop is hit
+RISK_PER_TRADE = 0.005        # default: 0.5% of equity at risk if the stop is hit. The approved value lives in the pinned limits file (risk_per_trade)
+MAX_RISK_PER_TRADE = 0.05     # hard ceiling no file may exceed
 MAX_COST_R = 0.25             # round-trip costs may not exceed a quarter of the amount risked
 EDGE_COST_MULTIPLE = 3.0      # if a source claims an expected move, it must beat round-trip costs by this multiple
 MIN_STOP_FRACTION = 0.005     # stops tighter than 0.5% of price are noise
@@ -31,6 +32,7 @@ class Limits:
     account_drawdown_halt: float
     daily_loss_halt: float
     sha256: str
+    risk_per_trade: float = RISK_PER_TRADE
 
 
 def limits_path() -> Path:
@@ -65,9 +67,9 @@ def load() -> tuple[Limits | None, str]:
         return None, "config/limits.toml changed since it was pinned (approve it again with limits-approve or limits-pin)"
     try:
         d = tomllib.loads(path.read_text())
-        lim = Limits(d["profile"], float(d["max_exposure_fraction"]), float(d["account_drawdown_halt"]), float(d["daily_loss_halt"]), h)
+        lim = Limits(d["profile"], float(d["max_exposure_fraction"]), float(d["account_drawdown_halt"]), float(d["daily_loss_halt"]), h, float(d.get("risk_per_trade", RISK_PER_TRADE)))
     except (KeyError, ValueError, tomllib.TOMLDecodeError) as exc:
         return None, f"config/limits.toml is not valid: {exc!r}"
-    if not (0 < lim.max_exposure_fraction <= 1 and 0 < lim.account_drawdown_halt < 1 and 0 < lim.daily_loss_halt < 1):
+    if not (0 < lim.max_exposure_fraction <= 1 and 0 < lim.account_drawdown_halt < 1 and 0 < lim.daily_loss_halt < 1 and 0 < lim.risk_per_trade <= MAX_RISK_PER_TRADE):
         return None, "config/limits.toml has values outside their allowed range"
     return lim, ""

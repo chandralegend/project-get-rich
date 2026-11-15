@@ -123,7 +123,7 @@ def _trading_command(args) -> int:
     for p in st.positions.values():
         px = st.prices.get(p.symbol, (p.avg_price,))[0]
         print(f"  {p.symbol}: {p.qty:g} @ {p.avg_price:.2f}  now {px:.2f}  unrealised {(px - p.avg_price) * p.qty:+.2f}  stop {p.stop_price}  take profit {p.take_profit}")
-    print("limits:", f"{lim.profile} (exposure {lim.max_exposure_fraction:.0%}, drawdown halt {lim.account_drawdown_halt:.0%}, daily halt {lim.daily_loss_halt:.1%}), pinned" if lim else f"NOT USABLE: {why}")
+    print("limits:", f"{lim.profile} (exposure {lim.max_exposure_fraction:.0%}, drawdown halt {lim.account_drawdown_halt:.0%}, daily halt {lim.daily_loss_halt:.1%}, risk per trade {lim.risk_per_trade:.2%}), pinned" if lim else f"NOT USABLE: {why}")
     print("KILL SWITCH ON" if st.killed else "kill switch off", "|", "DRAWDOWN HALT LATCHED" if st.halt_latched else "no drawdown halt")
     return 0
 
@@ -234,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     la = sub.add_parser("limits-approve", help="approve a risk-limit profile: writes config/limits.toml and logs the decision")
     la.add_argument("--profile", required=True, choices=["minimal", "conservative", "moderate", "full"])
     la.add_argument("--replace", action="store_true", help="overwrite an existing config/limits.toml")
+    la.add_argument("--risk-per-trade", type=float, default=None, help="fraction of equity at risk if a stop is hit, e.g. 0.02 for 2% (default 0.005, ceiling 0.05)")
     args = p.parse_args(argv)
 
     if args.cmd == "collect-binance":
@@ -478,13 +479,14 @@ def main(argv: list[str] | None = None) -> int:
         res = baseline_report.run()
         trend = res["returns"][[c for c in res["returns"].columns if c.endswith(":trend")]]
         derived = limits.derive(trend, limits.load_hourly(["BTCUSDT", "ETHUSDT"]))
-        text = limits.to_toml(derived, args.profile, approved=True)
+        text = limits.to_toml(derived, args.profile, approved=True, risk_per_trade=args.risk_per_trade)
         target.parent.mkdir(exist_ok=True)
         target.write_text(text)
         p_ = derived["profiles"][args.profile]
         emit("limits.approved", service="operator", profile=args.profile, sha256=hashlib.sha256(text.encode()).hexdigest(),
              max_exposure_fraction=p_["exposure_cap"], account_drawdown_halt=p_["proposed_account_drawdown_halt"],
-             daily_loss_halt=p_["proposed_daily_loss_halt"], gap_fits_inside_halt=p_["gap_fits_inside_halt"])
+             daily_loss_halt=p_["proposed_daily_loss_halt"], gap_fits_inside_halt=p_["gap_fits_inside_halt"],
+             risk_per_trade=args.risk_per_trade if args.risk_per_trade is not None else 0.005)
         from .trading import limits as trading_limits
 
         pinned = trading_limits.pin()          # the approval is what pins the file the risk gate will trust

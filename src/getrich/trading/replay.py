@@ -124,8 +124,8 @@ def run(bars: dict[str, pd.DataFrame], cfg: ReplayConfig) -> ReplayResult:
             entry_fee = cost * fee
             exposure_after = state.exposure + verdict.qty * c
             step = DEFAULT_RULES[s].step
-            if verdict.risk_amount > equity * L.RISK_PER_TRADE + 1e-9:
-                violations.append(f"{day:%Y-%m-%d} {s}: risk {verdict.risk_amount:.4f} above {L.RISK_PER_TRADE:.2%} of equity {equity:.2f}")
+            if verdict.risk_amount > equity * cfg.limits.risk_per_trade + 1e-9:
+                violations.append(f"{day:%Y-%m-%d} {s}: risk {verdict.risk_amount:.4f} above {cfg.limits.risk_per_trade:.2%} of equity {equity:.2f}")
             if exposure_after > cfg.limits.max_exposure_fraction * equity + 1e-6:
                 violations.append(f"{day:%Y-%m-%d} {s}: exposure {exposure_after / equity:.2%} above the {cfg.limits.max_exposure_fraction:.0%} cap")
             if abs(verdict.qty / step - round(verdict.qty / step)) > 1e-6 or verdict.qty * c < DEFAULT_RULES[s].min_notional - 1e-9:
