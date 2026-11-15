@@ -186,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     ns.add_argument("--partial", action="store_true", help="use whichever GDELT series are cached (exploratory)")
     pr = sub.add_parser("preregister", help="log the SHA-256 of a pre-registration file so later edits are visible; the experiment refuses to run on an unlogged file")
     pr.add_argument("file", nargs="?", default="docs/preregistration-news-forecast.md")
+    ps = sub.add_parser("portfolio-study", help="run the PRE-REGISTERED wider-universe trend and momentum study; writes docs/portfolio-study.md")
+    ps.add_argument("--no-register", action="store_true", help="do not add the strategies to the trial registry")
     pt = sub.add_parser("pinet-train", help="EXPLORATORY: train the PI-Net with a selected forecaster and/or news channel, compare with the baseline on identical rows (CPCV + strategy backtest); not registered")
     pt.add_argument("--forecaster", choices=["chronos2", "timesfm25", "kronos_small", "none"], default="chronos2", help="pretrained forecaster whose cached forecasts become a channel")
     pt.add_argument("--news", choices=["gdelt", "gdelt-partial", "none"], default="gdelt", help="news channel; gdelt-partial uses whichever series are cached (exploratory)")
@@ -265,6 +267,15 @@ def main(argv: list[str] | None = None) -> int:
         from .eval import channel_ablation
 
         print("logged", channel_ablation.register_prereg(args.file))
+        return 0
+    if args.cmd == "portfolio-study":
+        from .eval import portfolio_study
+
+        res = portfolio_study.run(register=not args.no_register)
+        text = portfolio_study.to_markdown(res)
+        print(text)
+        (config.root() / "docs" / "portfolio-study.md").write_text(text)
+        print("wrote docs/portfolio-study.md")
         return 0
     if args.cmd == "pinet-train":
         from .eval import channel_ablation

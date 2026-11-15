@@ -100,5 +100,35 @@
     "name": "meta-trend-v1:primary_alone",
     "sharpe_annual": 0.6806,
     "source": "docs/phase3-meta-results.md"
+  },
+  {
+    "phase": 4,
+    "name": "portfolio-v1:S0",
+    "sharpe_annual": 0.4438,
+    "source": "docs/portfolio-study.md"
+  },
+  {
+    "phase": 4,
+    "name": "portfolio-v1:S1",
+    "sharpe_annual": 0.4674,
+    "source": "docs/portfolio-study.md"
+  },
+  {
+    "phase": 4,
+    "name": "portfolio-v1:S2",
+    "sharpe_annual": 0.5022,
+    "source": "docs/portfolio-study.md"
+  },
+  {
+    "phase": 4,
+    "name": "portfolio-v1:S3",
+    "sharpe_annual": 0.5166,
+    "source": "docs/portfolio-study.md"
+  },
+  {
+    "phase": 4,
+    "name": "portfolio-v1:S4",
+    "sharpe_annual": 0.4217,
+    "source": "docs/portfolio-study.md"
   }
 ]
