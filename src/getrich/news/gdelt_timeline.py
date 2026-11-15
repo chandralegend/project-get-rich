@@ -63,11 +63,18 @@ def parse_timeline(payload: dict) -> list[tuple[str, float]]:
 
 def fetch_one(client: httpx.Client, name: str, mode: str, end: str, *, retries: int = 14, sleep=time.sleep) -> list[tuple[str, float]]:
     """GDELT throttles this connection in bursts (HTTP 429 after a ten second wait). Wait and retry patiently: 90 seconds, growing by half
-    each time to a five minute cap, up to `retries` times, which is over an hour in the worst case. Other errors fail at once."""
+    each time to a five minute cap, up to `retries` times, which is over an hour in the worst case. Network timeouts are retried the same way. Other errors fail at once."""
     params = {"query": f"{SERIES[name]} sourcelang:english", "mode": MODES[mode], "format": "json", "startdatetime": START, "enddatetime": end}
     wait = 90.0
     for attempt in range(retries + 1):
-        resp = client.get(API, params=params)
+        try:
+            resp = client.get(API, params=params)
+        except httpx.TransportError:                                  # timeouts and dropped connections are as transient as a 429
+            if attempt < retries:
+                sleep(wait)
+                wait = min(wait * 1.5, 300.0)
+                continue
+            raise
         if resp.status_code == 200:
             try:
                 data = parse_timeline(resp.json())

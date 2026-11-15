@@ -93,3 +93,19 @@ def test_features_are_causal_scaled_and_neutral_without_history():
 def test_a_load_without_a_fetch_says_what_to_run():
     with pytest.raises(RuntimeError, match="news-fetch"):
         g.load_daily()
+
+
+def test_network_timeout_is_retried_like_a_rate_limit():
+    import httpx
+
+    calls, sleeps = {"n": 0}, []
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json={"timeline": [{"series": "x", "data": [{"date": "20240101T000000Z", "value": 1.0}]}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    out = g.fetch_one(client, "btc", "vol", "20240201000000", sleep=sleeps.append)
+    assert calls["n"] == 2 and sleeps == [90.0] and len(out) == 1
