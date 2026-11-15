@@ -33,6 +33,7 @@ class Cache:
     symbol: str
     origins: np.ndarray                     # datetime64[ns], the bar-open time of each origin day
     cube: np.ndarray                        # (n, H, Q) float32
+    skipped: np.ndarray | None = None       # origins the model could not forecast (invalid prices); never retried, always reported
 
     def __len__(self) -> int:
         return len(self.origins)
@@ -50,22 +51,30 @@ def load_cache(model: str, symbol: str) -> Cache | None:
     meta = json.loads(str(z["meta"]))
     if tuple(meta["horizons"]) != HORIZONS or tuple(meta["quantiles"]) != QUANTILES:
         raise RuntimeError(f"{p} was written with different horizons or quantiles than the code now uses; regenerate it")
-    return Cache(model, symbol, z["origins"], z["cube"])
+    return Cache(model, symbol, z["origins"], z["cube"], z["skipped"] if "skipped" in z.files else np.array([], dtype="datetime64[ns]"))
 
 
 def save_cache(c: Cache) -> None:
     p = cache_path(c.model, c.symbol)
     p.parent.mkdir(parents=True, exist_ok=True)
     order = np.argsort(c.origins)
-    np.savez_compressed(p, origins=c.origins[order], cube=c.cube[order].astype(np.float32),
+    skipped = c.skipped if c.skipped is not None else np.array([], dtype="datetime64[ns]")
+    np.savez_compressed(p, origins=c.origins[order], cube=c.cube[order].astype(np.float32), skipped=skipped,
                         meta=json.dumps({"horizons": list(HORIZONS), "quantiles": list(QUANTILES), "model": c.model}))
 
 
-def validate_cube(cube: np.ndarray, n: int) -> tuple[np.ndarray, int]:
-    """Shape and finiteness are hard requirements. Crossing quantiles are repaired by sorting and counted."""
+def validate_cube(cube: np.ndarray, n: int, allow_missing: bool = False) -> tuple[np.ndarray, int]:
+    """Shape and finiteness are hard requirements. Crossing quantiles are repaired by sorting and counted.
+    With allow_missing, a row that is entirely non-finite means 'the model could not forecast this origin' and is allowed
+    (the caller skips it); a row that is only partly non-finite is still an error."""
     if cube.shape != (n, len(HORIZONS), len(QUANTILES)):
         raise ValueError(f"forecaster returned shape {cube.shape}, expected {(n, len(HORIZONS), len(QUANTILES))}")
-    if not np.isfinite(cube).all():
+    finite = np.isfinite(cube)
+    if allow_missing:
+        row_all, row_none = finite.all(axis=(1, 2)), ~finite.any(axis=(1, 2))
+        if not (row_all | row_none).all():
+            raise ValueError("forecaster returned non-finite values in part of a row")
+    elif not finite.all():
         raise ValueError("forecaster returned non-finite values")
     fixed = np.sort(cube, axis=-1)
-    return fixed, int((fixed != cube).any(axis=-1).sum())
+    return fixed, int((fixed[finite.all(axis=(1, 2))] != cube[finite.all(axis=(1, 2))]).any(axis=-1).sum()) if allow_missing else int((fixed != cube).any(axis=-1).sum())

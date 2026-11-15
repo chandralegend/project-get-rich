@@ -220,3 +220,67 @@ def test_an_interrupted_run_keeps_every_batch_that_finished():
     generate(Dies(), "A", bars, stride=1, batch=10)                           # the rerun resumes and adds only what was missing
     full = load_cache("fake_dies", "A")
     assert len(full) == len(np.unique(full.origins)) > 100
+
+
+def test_a_row_the_model_could_not_forecast_is_skipped_recorded_and_never_retried():
+    class OneFails(RandomWalk):
+        name = "fake_onefails"
+
+        def forecast(self, ohlcv, ts):
+            cube = super().forecast(ohlcv, ts)
+            cube[3] = np.nan                                                    # the model failed on the fourth origin of every batch
+            return cube
+
+    bars = make_bars(300)
+    generate(OneFails(), "A", bars, stride=1, batch=10)
+    c = load_cache("fake_onefails", "A")
+    assert len(c.skipped) > 5 and np.isfinite(c.cube).all()
+    assert not np.isin(c.skipped, c.origins).any()                              # skipped origins are not scored
+    n_before = (len(c), len(c.skipped))
+    generate(OneFails(), "A", bars, stride=1, batch=10)
+    c2 = load_cache("fake_onefails", "A")
+    assert (len(c2), len(c2.skipped)) == n_before                               # a rerun does not retry them
+
+
+def test_validate_cube_allows_whole_missing_rows_only_when_asked_and_never_part_of_a_row():
+    ok = np.zeros((3, len(HORIZONS), len(QUANTILES)))
+    miss = ok.copy()
+    miss[1] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        validate_cube(miss, 3)
+    assert validate_cube(miss, 3, allow_missing=True)[0].shape == miss.shape
+    part = ok.copy()
+    part[1, 0, 0] = np.nan
+    with pytest.raises(ValueError, match="part of a row"):
+        validate_cube(part, 3, allow_missing=True)
+
+
+def test_a_batch_where_most_origins_fail_is_a_broken_worker_not_a_quirk():
+    class MostlyFails(RandomWalk):
+        name = "fake_mostlyfails"
+
+        def forecast(self, ohlcv, ts):
+            cube = super().forecast(ohlcv, ts)
+            cube[: len(cube) - 1] = np.nan
+            return cube
+
+    with pytest.raises(ValueError, match="non-finite"):
+        generate(MostlyFails(), "A", make_bars(200), stride=1, batch=10)
+
+
+def test_the_kronos_path_summary_drops_invalid_paths_and_fails_a_row_with_too_few():
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location("_paths", Path(__file__).parents[1] / "src/getrich/forecast/workers/_paths.py")
+    paths = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(paths)
+    rng = np.random.default_rng(0)
+    s = rng.normal(0, 0.05, (12, 3, 20)).cumsum(axis=2)
+    s[0, 1, 13:] = np.nan                                                       # one path of series 1 went to zero or below
+    s[:6, 2, 14:] = np.nan                                                      # half of series 2's paths did: too few left
+    cube, bad = paths.quantile_cube(s, (1, 5, 20), (0.1, 0.5, 0.9))
+    assert np.isfinite(cube[0]).all() and np.isfinite(cube[1]).all() and np.isnan(cube[2]).all()
+    assert list(bad) == [0, 1, 6]
+    good_only = np.quantile(s[1:, 1, 19], [0.1, 0.5, 0.9])
+    np.testing.assert_allclose(cube[1, 2], good_only)                           # computed over the valid paths only

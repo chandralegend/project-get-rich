@@ -47,6 +47,7 @@ class SubprocessForecaster(Forecaster):
         self.default_stride, self.batch = spec.stride, spec.batch
         self._launcher = launcher                      # tests substitute a plain python; real runs use uv with the model's requirements
         self._env = env or {}
+        self.last_diag: dict = {}
 
     def command(self, inp: Path, out: Path) -> list[str]:
         if self._launcher is not None:
@@ -66,4 +67,6 @@ class SubprocessForecaster(Forecaster):
             proc = subprocess.run(self.command(inp, out), capture_output=True, text=True, timeout=self.spec.timeout_s, env=env, cwd=d)
             if proc.returncode != 0 or not out.exists():
                 raise RuntimeError(f"{self.spec.name} worker failed (exit {proc.returncode}): {(proc.stderr or proc.stdout)[-600:]}")
-            return np.load(out)["cube"]
+            z = np.load(out)
+            self.last_diag = {"invalid_paths": int(z["invalid_paths"].sum()), "origins_with_invalid_paths": int((z["invalid_paths"] > 0).sum())} if "invalid_paths" in z.files else {}
+            return z["cube"]

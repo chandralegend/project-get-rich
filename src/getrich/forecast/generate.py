@@ -41,22 +41,32 @@ def generate(fc: Forecaster, symbol: str, bars: pd.DataFrame, *, stride: int | N
     old = load_cache(fc.name, symbol)
     want = origin_indices(bars, fc.context_len, stride, since)
     ns = index_ns(bars.index)
-    todo = want[~np.isin(ns[want], old.origins.astype("datetime64[ns]").astype("int64"))] if old and len(old) else want
+    done = np.concatenate([old.origins.astype("datetime64[ns]").astype("int64"), old.skipped.astype("datetime64[ns]").astype("int64")]) if old is not None else np.array([], dtype="int64")
+    todo = want[~np.isin(ns[want], done)] if len(done) else want
     if max_new is not None:
         todo = todo[:max_new]
-    merged, crossed = old, 0
+    merged, crossed, skipped_total = old, 0, 0
     for s in range(0, len(todo), batch):
         part = todo[s: s + batch]
         X, T = windows(bars, part, fc.context_len)
-        cube, n_cross = validate_cube(fc.forecast(X, T), len(part))
+        raw = fc.forecast(X, T)
+        cube, n_cross = validate_cube(raw, len(part), allow_missing=True)
         crossed += n_cross
-        new_o = ns[part].astype("datetime64[ns]")
-        merged = Cache(fc.name, symbol, np.concatenate([merged.origins, new_o]) if merged and len(merged) else new_o,
-                       np.concatenate([merged.cube, cube]) if merged and len(merged) else cube)
+        have = np.isfinite(cube).all(axis=(1, 2))
+        if (~have).mean() > 0.5:                 # a few failed origins are a model quirk; most of a batch failing is a broken worker
+            raise ValueError(f"forecaster returned non-finite values for {int((~have).sum())} of {len(part)} origins in a batch")
+        new_o = ns[part][have].astype("datetime64[ns]")
+        skipped_o = ns[part][~have].astype("datetime64[ns]")
+        skipped_total += len(skipped_o)
+        base_o = merged.origins if merged is not None and len(merged) else np.array([], dtype="datetime64[ns]")
+        base_c = merged.cube if merged is not None and len(merged) else np.zeros((0,) + cube.shape[1:], dtype=np.float32)
+        base_s = merged.skipped if merged is not None and merged.skipped is not None else np.array([], dtype="datetime64[ns]")
+        merged = Cache(fc.name, symbol, np.concatenate([base_o, new_o]), np.concatenate([base_c, cube[have]]), np.concatenate([base_s, skipped_o]))
         save_cache(merged)                       # after EVERY batch: an interrupted run keeps everything finished so far
         if progress:
             progress(s + len(part), len(todo))
     if len(todo):
-        emit("forecast.generated", service=SERVICE, model=fc.name, symbol=symbol, new=int(len(todo)), total=len(merged), crossing_fixed=crossed)
+        emit("forecast.generated", service=SERVICE, model=fc.name, symbol=symbol, new=int(len(todo)) - skipped_total, skipped=skipped_total,
+             total=len(merged), crossing_fixed=crossed, **(getattr(fc, "last_diag", None) or {}))
         return merged
     return old or Cache(fc.name, symbol, np.array([], dtype="datetime64[ns]"), np.zeros((0, 0, 0), dtype=np.float32))

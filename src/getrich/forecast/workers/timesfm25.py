@@ -18,10 +18,13 @@ cube = np.zeros((n, len(H), len(Q)))
 CHUNK = 128
 for s in range(0, n, CHUNK):
     logp = [np.log(ohlcv[i, :, 3]) for i in range(s, min(s + CHUNK, n))]
-    _point, quant = model.forecast(horizon=horizon, inputs=logp)
+    m = len(logp)                                      # the library pads the list it is given IN PLACE up to a multiple of the batch size, so count first
+    last = [lp[-1] for lp in logp]
+    _point, quant = model.forecast(horizon=horizon, inputs=list(logp))
     quant = np.asarray(quant)
-    for r, lp in enumerate(logp):
+    assert quant.shape[0] == m and quant.shape[1] >= horizon, f"unexpected TimesFM output {quant.shape} for {m} series"
+    for r in range(m):
         for j, h in enumerate(H):
             for k, q in enumerate(Q):
-                cube[s + r, j, k] = quant[r, h - 1, 1 + int(np.argmin(np.abs(np.array(levels) - q)))] - lp[-1]
+                cube[s + r, j, k] = quant[r, h - 1, 1 + int(np.argmin(np.abs(np.array(levels) - q)))] - last[r]
 np.savez(sys.argv[2], cube=cube)
