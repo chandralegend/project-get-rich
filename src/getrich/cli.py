@@ -186,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     ns.add_argument("--partial", action="store_true", help="use whichever GDELT series are cached (exploratory)")
     pr = sub.add_parser("preregister", help="log the SHA-256 of a pre-registration file so later edits are visible; the experiment refuses to run on an unlogged file")
     pr.add_argument("file", nargs="?", default="docs/preregistration-news-forecast.md")
+    rvt = sub.add_parser("replay-voltarget", help="replay the volatility-scaled trend strategy through the real gate and approved limits; writes docs/phase4-voltarget.md with --write")
+    rvt.add_argument("--write", action="store_true")
     ps = sub.add_parser("portfolio-study", help="run the PRE-REGISTERED wider-universe trend and momentum study; writes docs/portfolio-study.md")
     ps.add_argument("--no-register", action="store_true", help="do not add the strategies to the trial registry")
     pt = sub.add_parser("pinet-train", help="EXPLORATORY: train the PI-Net with a selected forecaster and/or news channel, compare with the baseline on identical rows (CPCV + strategy backtest); not registered")
@@ -268,6 +270,16 @@ def main(argv: list[str] | None = None) -> int:
         from .eval import channel_ablation
 
         print("logged", channel_ablation.register_prereg(args.file))
+        return 0
+    if args.cmd == "replay-voltarget":
+        from .trading import replay_voltarget
+
+        out = replay_voltarget.run_all()
+        text = replay_voltarget.to_markdown(out)
+        print(text)
+        if args.write:
+            (config.root() / "docs" / "phase4-voltarget.md").write_text(text)
+            print("wrote docs/phase4-voltarget.md")
         return 0
     if args.cmd == "portfolio-study":
         from .eval import portfolio_study
