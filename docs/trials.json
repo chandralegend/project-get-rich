@@ -130,5 +130,77 @@
     "name": "portfolio-v1:S4",
     "sharpe_annual": 0.4217,
     "source": "docs/portfolio-study.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:linear:A",
+    "sharpe_annual": 0.3735,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:linear:B",
+    "sharpe_annual": 0.0925,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:linear:C",
+    "sharpe_annual": 0.2594,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:linear:D",
+    "sharpe_annual": 0.0887,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:lgbm:A",
+    "sharpe_annual": 0.5295,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:lgbm:B",
+    "sharpe_annual": 0.6701,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:lgbm:C",
+    "sharpe_annual": 0.3701,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:lgbm:D",
+    "sharpe_annual": 0.528,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:fusion:A",
+    "sharpe_annual": 0.365,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:fusion:B",
+    "sharpe_annual": 0.0646,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:fusion:C",
+    "sharpe_annual": 0.3116,
+    "source": "docs/news-forecast-results.md"
+  },
+  {
+    "phase": 3,
+    "name": "news-forecast-v1:fusion:D",
+    "sharpe_annual": 0.1352,
+    "source": "docs/news-forecast-results.md"
   }
 ]
