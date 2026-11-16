@@ -4,6 +4,7 @@ Hugging Face model cards and file listings read on 2026-11-14 (docs/forecast-mod
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .. import config
@@ -38,6 +39,8 @@ def get(name: str, **kw) -> SubprocessForecaster:
         raise KeyError(f"unknown forecaster {name!r}; known: {sorted(SPECS)}")
     if name.startswith("kronos") and "env" not in kw:
         kw["env"] = {"KRONOS_SRC": str(kronos_src())}
+    if "launcher" not in kw and os.environ.get("GETRICH_FORECAST_PYTHON"):             # the models container has one prepared environment instead of `uv run --with`
+        kw["launcher"] = [os.environ["GETRICH_FORECAST_PYTHON"], "-I"]
     return SubprocessForecaster(SPECS[name], **kw)
 
 

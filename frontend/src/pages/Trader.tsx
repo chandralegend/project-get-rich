@@ -78,7 +78,7 @@ function Inputs({ pref }: { pref: string }) {
             ))}</tbody></table>
           </div>
         ))}
-        <div className="note" style={{ marginTop: 6 }}>Probability of an up move. These caches come from the research environment and are not refreshed by a run.</div>
+        <div className="note" style={{ marginTop: 6 }}>Probability of an up move. A separate models service adds one forecast per model after each daily bar closes (see System); a trader run does not compute them.</div>
       </div>
       <div className="note" style={{ marginTop: 8 }}><b>PI-Net:</b> {f?.pinet ?? "not an input."}</div>
     </Card>

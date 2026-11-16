@@ -37,6 +37,15 @@ To go back to launchd: `docker compose down`, move the plists back from `~/Libra
 
 ## Limits of this setup
 
-- The image holds only the runtime dependencies. It cannot train models or run the research workers (torch, lightgbm, forecasting weights stay on the host), and the Claude Agent SDK investigator is not set up in it.
+- The main image holds only the runtime dependencies. It cannot train models or run the research workers, and the Claude Agent SDK investigator is not set up in it. The forecasters run in a third container, `models` (below).
 - There is no login on the UI. It is published on 127.0.0.1 only, state-changing requests need a header and a local origin, and the approve, kill and halt-reset buttons are the same owner actions the terminal has. Do not publish the port beyond localhost without adding authentication.
 - The Phase 0 gate measures watchdog and collector continuity from the event log; there is a gap while the Mac is off or Docker is not running, exactly as before.
+
+
+## The models service (daily live forecasts)
+
+`models` is its own image (`docker/models.Dockerfile`, about 3.1 GB: CPU torch, Chronos-2, TimesFM 2.5, Kronos-small, LightGBM, the getrich source). It has **no network and no API keys**; the weights (volume `getrich-models-hf`), the lock file and the reviewed Kronos source are mounted read-only; it shares the data volume to read bars and write the forecast caches. Its scheduler (`getrich scheduler --only models`) runs `forecast-live` hourly; the job is idempotent, so it does nothing until a new daily bar exists and then adds one forecast per model for BTC and ETH (about two minutes, Kronos is most of it). State is in `data/state/scheduler-models.json`; the System screen shows each model's newest origin.
+
+First time (or after a Docker reset): `scripts/models-weights` copies the four weight sets from the host's Hugging Face cache into the volume and verifies every file against `config/forecast_models.lock.json`. Every run verifies the weights again before a worker starts and refuses on a mismatch. After code changes: `docker compose build models && docker compose up -d models`.
+
+Honest limits: Chronos-2 and TimesFM reproduce the Mac's results exactly. Kronos draws 12 samples, so its numbers differ run to run and between a CPU and the Mac's GPU; the research history was every 5th day on the GPU, the live origins are daily on CPU. None of these forecasters beat a random walk (docs/forecast-eval.md); they are shown, not trusted.

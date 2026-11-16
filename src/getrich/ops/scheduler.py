@@ -49,19 +49,35 @@ JOBS: tuple[Job, ...] = (
     Job("agents-score", ("agents-score",), daily_at=(7, 0), on_start=False, timeout_s=900),
 )
 
+# The models container runs its own instance with these jobs (it alone has torch and the model weights); its state is a separate file so two
+# schedulers never write the same one. The main scheduler must never carry them: its image cannot run a model.
+MODEL_JOBS: tuple[Job, ...] = (
+    Job("forecast-live", ("forecast-live",), every_s=3600, serial=False, timeout_s=3600),   # hourly and idempotent: does nothing until a new daily bar exists
+)
+
 _serial = threading.Lock()
 _state_lock = threading.Lock()
+_state_name = "scheduler"
 
 
-def state_path():
-    return config.state_dir() / "scheduler.json"
+def state_path(name: str | None = None):
+    return config.state_dir() / f"{name or _state_name}.json"
 
 
-def read_state() -> dict:
+def read_state(name: str | None = None) -> dict:
     try:
-        return json.loads(state_path().read_text())
+        return json.loads(state_path(name).read_text())
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def read_all() -> dict:
+    """The main scheduler's state with the models scheduler's jobs merged in; `models_heartbeat` says whether that second one is alive."""
+    main, models = read_state("scheduler"), read_state("scheduler-models")
+    out = {**main, "jobs": {**main.get("jobs", {}), **{k: v for k, v in models.get("jobs", {}).items() if not k.startswith("_")}}}
+    if models.get("heartbeat"):
+        out["models_heartbeat"] = models["heartbeat"]
+    return out
 
 
 def _write_state(name: str, **fields) -> None:
@@ -135,8 +151,10 @@ def _loop(job: Job, stop: threading.Event) -> None:
             run_once(job)
 
 
-def run_forever(jobs: tuple[Job, ...] = JOBS) -> None:
+def run_forever(jobs: tuple[Job, ...] = JOBS, state_name: str = "scheduler") -> None:
     """Block until interrupted. One thread per job; each sleeps on its own schedule."""
+    global _state_name
+    _state_name = state_name
     stop = threading.Event()
     emit("scheduler.started", service=SERVICE, jobs=[j.name for j in jobs])
     threads = [threading.Thread(target=_loop, args=(j, stop), name=j.name, daemon=True) for j in jobs]

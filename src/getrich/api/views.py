@@ -189,6 +189,15 @@ def news() -> dict:
 
 # ------------------------------------------------------------------------------------------------ system
 
+def forecast_status() -> list[dict]:
+    from ..forecast import live
+
+    try:
+        return live.status()
+    except Exception:
+        return []
+
+
 def health() -> dict:
     def build():
         services = {}
@@ -208,7 +217,7 @@ def health() -> dict:
             data.append({"venue": venue, "symbol": sym, "timeframe": tf, "bars": n, "last": iso(last), "age_hours": round((now - last).total_seconds() / 3600, 1), "class": (instruments.get(sym).asset_class if instruments.get(sym) else "other")})
         free = shutil.disk_usage(config.data_dir()).free / 2**30
         db = config.db_path()
-        return {"as_of": iso(now), "services": services, "scheduler": scheduler.read_state(), "data": data, "ledger": {"ok": chain_ok, "insights": n_insights, "bad_seq": bad},
+        return {"as_of": iso(now), "services": services, "scheduler": scheduler.read_all(), "forecasts": forecast_status(), "data": data, "ledger": {"ok": chain_ok, "insights": n_insights, "bad_seq": bad},
                 "budget": {"spent": round(spent, 4), "cap": budget.monthly_cap()}, "alerts": active_alerts(), "disk_free_gib": round(free, 1), "db_mb": round(db.stat().st_size / 2**20, 1) if db.exists() else 0,
                 "trader_classes": list(desk.trader_classes()), "in_docker": os.path.exists("/.dockerenv")}
     return cached("health", 20, build)

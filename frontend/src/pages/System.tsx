@@ -41,6 +41,15 @@ export default function System() {
         </Card>
       </div>
 
+      <Card title="Forecasters" right={<span className="note">{d.scheduler?.models_heartbeat ? `models service alive ${fmt.ago(d.scheduler.models_heartbeat)}` : "models service not running"}</span>}>
+        <div className="note" style={{ marginBottom: 8 }}>BTC and ETH only. A separate container (no network, no keys) adds one forecast per model after each daily bar closes. They did not beat a random walk in our tests, so they are shown, not trusted.</div>
+        {!(d.forecasts ?? []).length ? <Empty>No forecasts cached.</Empty> : (
+          <Table head={<><th>Model</th><th>Symbol</th><th className="r">Newest forecast origin</th><th className="r">Behind the newest daily bar</th></>}>
+            {d.forecasts.map((f: Json) => <tr key={f.model + f.symbol}><td>{f.model}</td><td><b>{f.symbol}</b></td><td className="r num dim">{f.newest_origin ?? "none"}</td><td className={`r num ${f.days_behind > 1 ? "warn" : "dim"}`}>{f.error ?? (f.days_behind == null ? "–" : f.days_behind === 0 ? "up to date" : `${f.days_behind} day${f.days_behind === 1 ? "" : "s"}`)}</td></tr>)}
+          </Table>
+        )}
+      </Card>
+
       <Card title="Market data" right={<span className="row">
         {["all", "crypto", "fx", "metal"].map((c) => <button key={c} className={`chip ${only === c ? "on" : ""}`} style={{ padding: "1px 10px" }} onClick={() => setOnly(c)}>{c}</button>)}
         <ActionButton className="btn sm primary" label={refreshing ? "Refreshing…" : "Refresh now"} disabled={refreshing} run={() => post("/api/data/refresh", { classes: ["crypto", "fx", "metal"] })} onDone={(m) => setJobId(m.id)} />

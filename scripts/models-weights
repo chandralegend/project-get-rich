@@ -1,0 +1,28 @@
+#!/bin/zsh
+# Copy the four forecaster weights from the host's Hugging Face cache into the Docker volume `getrich-models-hf`, then verify every file against
+# config/forecast_models.lock.json. The host cache is a shared blob store that cannot be mounted as it is, so files are copied with links resolved.
+# A copy that does not verify is a failure (three files were once silently damaged by a Docker disk fault; the check caught it).
+set -e
+cd "$(dirname "$0")/.."
+HF=${HF_CACHE:-$HOME/.cache/huggingface/hub}
+python3 - <<'PY'
+import json
+d = json.load(open("config/forecast_models.lock.json"))
+lines = []
+for k in ("kronos_small", "chronos2", "timesfm25"):
+    for repo, v in d[k]["repos"].items():
+        for f in v["files"]:
+            lines.append(f"{f['sha256']}  /dst/hub/models--{repo.replace('/', '--')}/snapshots/{v['revision']}/{f['name']}")
+open("/tmp/getrich_sums.txt", "w").write("\n".join(lines) + "\n")
+PY
+docker volume create getrich-models-hf >/dev/null
+docker run --rm -v "$HF:/src:ro" -v getrich-models-hf:/dst -v /tmp/getrich_sums.txt:/sums.txt:ro alpine sh -c '
+set -e
+for m in models--amazon--chronos-2 models--google--timesfm-2.5-200m-pytorch models--NeoQuasar--Kronos-small models--NeoQuasar--Kronos-Tokenizer-base; do
+  rev=$(cat /src/$m/refs/main)
+  mkdir -p /dst/hub/$m/snapshots/$rev /dst/hub/$m/refs
+  cp /src/$m/refs/main /dst/hub/$m/refs/main
+  for f in /src/$m/snapshots/$rev/*; do cp -L "$f" /dst/hub/$m/snapshots/$rev/; done
+done
+sync
+sha256sum -c /sums.txt'

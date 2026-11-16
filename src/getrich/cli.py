@@ -145,7 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     sv = sub.add_parser("serve", help="run the web UI and API (localhost only by default)")
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8000)
-    sub.add_parser("scheduler", help="run the scheduled jobs (the launchd jobs, inside a container); blocks until interrupted")
+    sc = sub.add_parser("scheduler", help="run the scheduled jobs (the launchd jobs, inside a container); blocks until interrupted")
+    sc.add_argument("--only", choices=["models"], default=None, help="run just the model jobs (the models container has torch and the weights; the main scheduler does not)")
+    fl = sub.add_parser("forecast-live", help="forecast the newest closed daily bar with each foundation model for BTC and ETH (idempotent; needs the models image)")
+    fl.add_argument("--models", nargs="+", choices=["chronos2", "timesfm25", "kronos_small"], default=None)
+    fl.add_argument("--status", action="store_true", help="only show the newest cached origin per model and symbol")
     sub.add_parser("collect-news", help="fetch central-bank RSS feeds into the store")
     sub.add_parser("collect-webnews", help="fetch open web news headlines (GDELT and Google News RSS) by topic")
     sub.add_parser("watchdog", help="run all health checks once, raise or clear alerts")
@@ -282,8 +286,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "scheduler":
         from .ops import scheduler
 
-        scheduler.run_forever()
+        if args.only == "models":
+            scheduler.run_forever(scheduler.MODEL_JOBS, "scheduler-models")
+        else:
+            scheduler.run_forever()
         return 0
+    if args.cmd == "forecast-live":
+        from .forecast import live
+
+        if args.status:
+            print(json.dumps(live.status(), indent=1))
+            return 0
+        res = live.run(tuple(args.models) if args.models else live.MODELS)
+        for r in res["results"]:
+            print(f"{r['model']:13} {r['symbol']:8} {r['status']:10} {r.get('origin', '')} {r.get('error', '')}")
+        return 0 if res["ok"] else 1
     if args.cmd == "collect-fx":
         from .collectors import yahoo
 

@@ -231,14 +231,26 @@ def news_freshness(now: datetime) -> dict:
             "stories_from_last_24h_not_yet_classified": backlog, "briefing_hours_old": _age_h(briefing_ts, now)}
 
 
+def _forecaster_freshness() -> dict:
+    """Newest forecast origin per model and symbol, and how many days behind the newest daily bar it is (the models service adds one a day)."""
+    out = {"covers": "BTCUSDT and ETHUSDT only",
+           "note": "a separate models service adds one forecast per model and symbol after each daily bar closes; a run does not compute them. Each forecast shows its origin date and a stale flag"}
+    try:
+        from ..forecast import live
+
+        out["newest_origin"] = {f"{r['model']}/{r['symbol']}": {"origin": r.get("newest_origin"), "days_behind": r.get("days_behind")} for r in live.status()}
+    except Exception as exc:                                                     # never let a cache problem stop a plan
+        out["error"] = type(exc).__name__
+    return out
+
+
 def _freshness(now: datetime, scan: dict, refresh: dict | None) -> dict:
     """How old every input is, in plain hours, and what the pre-run refresh managed to do. The trader is told to discount what is stale."""
     ages = [r["data_age_hours"] for r in scan.values() if r.get("available") and r.get("data_age_hours") is not None]
     return {
         "market_data": {"hourly_bar_age_hours": {"newest": min(ages), "oldest": max(ages)} if ages else None},
         "news": news_freshness(now),
-        "forecasters": {"covers": "BTCUSDT and ETHUSDT only", "refreshed_by_this_run": False,
-                        "note": "walk-forward caches from the research environment; each forecast shows its own origin date and a stale flag"},
+        "forecasters": _forecaster_freshness(),
         "pinet": "no live PI-Net output exists. The models were trained as research, found no edge in any pre-registered test and need the host ML environment, so it is not an input",
         "refresh_before_this_run": refresh if refresh is not None else {"ran": False},
     }

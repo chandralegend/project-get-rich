@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,8 +60,10 @@ def save_cache(c: Cache) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     order = np.argsort(c.origins)
     skipped = c.skipped if c.skipped is not None else np.array([], dtype="datetime64[ns]")
-    np.savez_compressed(p, origins=c.origins[order], cube=c.cube[order].astype(np.float32), skipped=skipped,
+    tmp = p.with_name(p.stem + ".tmp.npz")                  # written aside and renamed, so a reader (the API) never sees half a file
+    np.savez_compressed(tmp, origins=c.origins[order], cube=c.cube[order].astype(np.float32), skipped=skipped,
                         meta=json.dumps({"horizons": list(HORIZONS), "quantiles": list(QUANTILES), "model": c.model}))
+    os.replace(tmp, p)
 
 
 def validate_cube(cube: np.ndarray, n: int, allow_missing: bool = False) -> tuple[np.ndarray, int]:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -63,6 +64,15 @@ def fetch_weights(name: str) -> dict:
     return entry
 
 
+def snapshot_dir(repo: str, info: dict) -> Path:
+    """Where a locked snapshot is on this machine. The lock records the host's cache path; in the models container the same revision sits under
+    HF_HOME in the standard layout (hub/models--<org>--<name>/snapshots/<revision>). The hashes are checked either way."""
+    recorded = Path(info["path"])
+    if recorded.exists() or not os.environ.get("HF_HOME"):
+        return recorded
+    return Path(os.environ["HF_HOME"]) / "hub" / ("models--" + repo.replace("/", "--")) / "snapshots" / info["revision"]
+
+
 def verify(name: str) -> list[str]:
     """Problems with the downloaded weights (empty list means fine): not fetched, missing file, wrong size or hash."""
     lock = load_lock().get(name)
@@ -70,7 +80,7 @@ def verify(name: str) -> list[str]:
         return [f"{name} weights are not fetched: run `getrich forecast-fetch {name}`"]
     problems = []
     for repo, info in lock["repos"].items():
-        base = Path(info["path"])
+        base = snapshot_dir(repo, info)
         for f in info["files"]:
             p = base / f["name"]
             if not p.exists():
