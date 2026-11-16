@@ -113,8 +113,8 @@ def test_the_models_container_picks_its_prepared_python_and_finds_weights_under_
 
 
 def test_the_main_scheduler_never_carries_the_model_job_and_the_models_one_does():
-    assert not any(j.name == "forecast-live" for j in scheduler.JOBS)
-    assert [j.name for j in scheduler.MODEL_JOBS] == ["forecast-live"] and not any(a in ("trader", "approve", "propose") for j in scheduler.MODEL_JOBS for a in j.args)
+    assert not any(j.name in ("forecast-live", "pinet-live") for j in scheduler.JOBS)
+    assert [j.name for j in scheduler.MODEL_JOBS] == ["forecast-live", "pinet-live"] and not any(a in ("trader", "approve", "propose") for j in scheduler.MODEL_JOBS for a in j.args)
 
 
 def test_the_two_schedulers_keep_separate_state_files_and_read_all_merges_them():

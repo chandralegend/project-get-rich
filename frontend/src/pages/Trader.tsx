@@ -80,7 +80,11 @@ function Inputs({ pref }: { pref: string }) {
         ))}
         <div className="note" style={{ marginTop: 6 }}>Probability of an up move. A separate models service adds one forecast per model after each daily bar closes (see System); a trader run does not compute them.</div>
       </div>
-      <div className="note" style={{ marginTop: 8 }}><b>PI-Net:</b> {f?.pinet ?? "not an input."}</div>
+      <div className="note" style={{ marginTop: 8 }}>
+        <b>PI-Net</b> (frozen model, forward study, no demonstrated edge):{" "}
+        {Object.entries(pk.markets ?? {}).filter(([, m]: [string, any]) => m.pinet?.call).map(([sym, m]: [string, any]) => `${sym} ${m.pinet.call.replace(/_/g, " ")}${m.pinet.expected_r != null ? ` (E[R] ${m.pinet.expected_r.toFixed(2)})` : ""}`).join(" · ") || "no decision in this plan's input."}
+        {f?.pinet?.study && <> Study so far: {f.pinet.study.resolved} resolved, {f.pinet.study.note}.</>}
+      </div>
     </Card>
   );
 }

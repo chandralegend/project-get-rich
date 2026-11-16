@@ -53,6 +53,7 @@ JOBS: tuple[Job, ...] = (
 # schedulers never write the same one. The main scheduler must never carry them: its image cannot run a model.
 MODEL_JOBS: tuple[Job, ...] = (
     Job("forecast-live", ("forecast-live",), every_s=3600, serial=False, timeout_s=3600),   # hourly and idempotent: does nothing until a new daily bar exists
+    Job("pinet-live", ("pinet-live",), every_s=3600, serial=False, timeout_s=900),          # after the forecasts: needs today's Chronos-2 origin; hourly retries until it is there
 )
 
 _serial = threading.Lock()

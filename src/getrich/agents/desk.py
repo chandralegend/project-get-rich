@@ -48,7 +48,7 @@ DAYS_PER_YEAR = {"crypto": 365, "fx": 260, "metal": 260}
 SIGNAL_RECORD = {
     "daily_trend (2 of 3 EMA pairs up)": "The only rule with a decent risk-adjusted result (gated, daily, long-only, BTC and ETH only: Sharpe about 0.5 to 0.95 depending on sizing), but never cleared the pre-registered bar (docs/phase4-voltarget-entry.md). Buy and hold earned far more over 2020-2026. Weak evidence of value as a filter, none as a timing tool. Never tested on forex or gold.",
     "forecasters (Kronos, Chronos-2, TimesFM)": "None beat a random walk walk-forward on BTC or ETH (docs/forecast-eval.md). Treat any forecast as noise unless it agrees with independent evidence. They exist only for BTC and ETH.",
-    "PI-Net / ML fusion": "No detectable edge in any pre-registered variant, with or without news and Chronos-2 (docs/news-forecast-results.md). BTC and ETH only.",
+    "PI-Net / ML fusion": "No detectable edge in any pre-registered variant, with or without news and Chronos-2 (docs/news-forecast-results.md). BTC and ETH only. A frozen copy now scores BTC and ETH every day and is being scored forward in a pre-registered study (docs/preregistration-pinet-forward.md); the verdict is not due before about 180 days, so treat its score as noise until then.",
     "news volume and tone (GDELT)": "Event study found 3 of 96 nominal hits against about 4.8 expected by chance (docs/news-study.md). Useful for awareness of catalysts, not as a timing signal.",
     "hourly breakout (24-bar high/low with EMA filter)": "Lost money after costs on BTC and ETH, long and short, with and without leverage (docs/phase5-futures-breakout*.md). Not a reason to enter on its own. Untested on forex.",
     "hourly mean reversion (+-2.5 sigma fade)": "No gross edge on BTC and ETH: after long signals the average 24 h move was about zero, after short signals price kept rising (docs/phase5-futures-reversion.md). Untested on forex.",
@@ -231,6 +231,37 @@ def news_freshness(now: datetime) -> dict:
             "stories_from_last_24h_not_yet_classified": backlog, "briefing_hours_old": _age_h(briefing_ts, now)}
 
 
+def _pinet_view(sym: str) -> dict:
+    """The frozen PI-Net's newest call for this coin: take or skip when the trend rule is long (its domain), else out of domain. Shadow only."""
+    try:
+        from ..eval import pinet_live
+
+        got = pinet_live.latest().get(sym)
+    except Exception as exc:
+        return {"error": type(exc).__name__}
+    if not got:
+        return {"note": "no PI-Net decision recorded yet"}
+    return {**got, "status": "frozen model, scored forward in a pre-registered study; no demonstrated edge, do not rely on it"}
+
+
+def _pinet_freshness() -> dict:
+    out = {"what": "a frozen LightGBM model (trained on 2021 to 2026-10-25) scores a long entry for BTC and ETH on days when the trend rule is long; take means expected net R above zero",
+           "status": "forward study in progress (docs/preregistration-pinet-forward.md): not an input until it shows value"}
+    try:
+        from ..eval import pinet_live
+
+        v = pinet_live.verdict(pinet_live.records())
+        s = v["summary"]
+        out["study"] = {"decisions": s["decisions"], "resolved": s["resolved"], "take_resolved": s["take"], "mean_net_r_take": None if s["mean_take"] is None else round(s["mean_take"], 2),
+                        "mean_net_r_all": None if s["mean_all"] is None else round(s["mean_all"], 2), "verdict_due": v["due"], "days_since_first": v["days_since_first"],
+                        "note": "interim numbers, not a verdict" if not v["due"] else "checkpoint reached"}
+        if v["due"]:
+            out["study"]["shows_value"] = v["shows_value"]
+    except Exception as exc:
+        out["error"] = type(exc).__name__
+    return out
+
+
 def _forecaster_freshness() -> dict:
     """Newest forecast origin per model and symbol, and how many days behind the newest daily bar it is (the models service adds one a day)."""
     out = {"covers": "BTCUSDT and ETHUSDT only",
@@ -251,7 +282,7 @@ def _freshness(now: datetime, scan: dict, refresh: dict | None) -> dict:
         "market_data": {"hourly_bar_age_hours": {"newest": min(ages), "oldest": max(ages)} if ages else None},
         "news": news_freshness(now),
         "forecasters": _forecaster_freshness(),
-        "pinet": "no live PI-Net output exists. The models were trained as research, found no edge in any pre-registered test and need the host ML environment, so it is not an input",
+        "pinet": _pinet_freshness(),
         "refresh_before_this_run": refresh if refresh is not None else {"ran": False},
     }
 
@@ -321,6 +352,8 @@ def build_packet(now: datetime | None = None, journal: dict | None = None, class
         markets[s] = {"daily": _daily_view(daily_frames[s], cls), "hourly": _hourly_view(hourly_frames[s], now, cls)}
         if cls == "crypto":
             markets[s]["forecasts"] = _forecast_view(s, daily_frames[s])
+            if s in ("BTCUSDT", "ETHUSDT"):
+                markets[s]["pinet"] = _pinet_view(s)
     cross = {}
     if "BTCUSDT" in daily_frames and "ETHUSDT" in daily_frames:
         btc, eth = daily_frames["BTCUSDT"]["close"].pct_change(), daily_frames["ETHUSDT"]["close"].pct_change()

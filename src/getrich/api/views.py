@@ -111,7 +111,22 @@ def instrument_detail(symbol: str) -> dict:
            "market_open": instruments.is_open(symbol, now), "round_trip_cost_pct": round(inst.cost.round_trip() * 100, 3)}
     if inst.asset_class == "crypto":
         out["forecasts"] = desk._forecast_view(symbol, d)
+        if symbol in ("BTCUSDT", "ETHUSDT"):
+            out["pinet"] = desk._pinet_view(symbol)
     return out
+
+
+def pinet() -> dict:
+    """The forward PI-Net study as the screens show it: today's call per coin, the running record and how far the pre-registered checkpoint is."""
+    def build():
+        from ..eval import pinet_live
+
+        recs = pinet_live.records()
+        v = pinet_live.verdict(recs)
+        return {"latest": pinet_live.latest(), "summary": v["summary"], "p": v["p"], "due": v["due"], "days_since_first": v["days_since_first"], "left": v["left"], "checks": v["checks"],
+                "shows_value": v["shows_value"], "criteria": {"min_delta_r": pinet_live.MIN_DELTA, "alpha": pinet_live.ALPHA, "min_take": pinet_live.MIN_TAKE, "check_days": pinet_live.CHECK_DAYS,
+                                                               "check_resolved": pinet_live.CHECK_RESOLVED}}
+    return cached("pinet", 60, build)
 
 
 # ------------------------------------------------------------------------------------------------ trader

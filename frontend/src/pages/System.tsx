@@ -8,6 +8,7 @@ export default function System() {
   const [jobId, setJobId] = useState<string | null>(null);
   const job = useApi(jobId ? `/api/jobs/${jobId}` : null, 2500);
   const [only, setOnly] = useState("all");
+  const pn = useApi("/api/pinet", 60000);
   if (!h.data) return <Loading error={h.error} />;
   const d = h.data, sched: Json = d.scheduler?.jobs ?? {};
   const refreshing = (jobs.data?.jobs ?? []).some((j: Json) => j.kind === "refresh-data" && j.status === "running");
@@ -48,6 +49,24 @@ export default function System() {
             {d.forecasts.map((f: Json) => <tr key={f.model + f.symbol}><td>{f.model}</td><td><b>{f.symbol}</b></td><td className="r num dim">{f.newest_origin ?? "none"}</td><td className={`r num ${f.days_behind > 1 ? "warn" : "dim"}`}>{f.error ?? (f.days_behind == null ? "–" : f.days_behind === 0 ? "up to date" : `${f.days_behind} day${f.days_behind === 1 ? "" : "s"}`)}</td></tr>)}
           </Table>
         )}
+      </Card>
+
+      <Card title="PI-Net forward study" right={<span className="note">pre-registered · frozen model · interim numbers are not a verdict</span>}>
+        {!pn.data ? <Loading error={pn.error} /> : (() => {
+          const s = pn.data.summary, l = pn.data.latest ?? {}, r = (x: number | null) => (x == null ? "–" : x.toFixed(2));
+          return (
+            <>
+              <div className="note" style={{ marginBottom: 8 }}>A frozen model scores BTC and ETH each day the trend rule is long. Every call is stored in the ledger when it is made and resolved later against the bars that follow. It found no edge in history, so this asks whether it does on decisions made after it was trained. The verdict is set for {pn.data.criteria.check_days} days and {pn.data.criteria.check_resolved} resolved decisions.</div>
+              <Table head={<><th>Coin</th><th>Latest bar</th><th>Trend votes</th><th>Call</th><th className="r">Expected R</th><th className="r">P(win)</th></>}>
+                {["BTCUSDT", "ETHUSDT"].map((c) => l[c] ? <tr key={c}><td><b>{c}</b></td><td className="dim">{l[c].decision_bar}</td><td className="num">{(l[c].trend_votes * 3).toFixed(0)} of 3</td><td><Pill tone={l[c].call === "take" ? "up" : ""}>{l[c].call.replace(/_/g, " ")}</Pill></td><td className="r num">{r(l[c].expected_r)}</td><td className="r num">{l[c].p_positive == null ? "–" : `${Math.round(l[c].p_positive * 100)}%`}</td></tr> : <tr key={c}><td><b>{c}</b></td><td colSpan={5} className="dim">no decision recorded yet</td></tr>)}
+              </Table>
+              <div className="row note num" style={{ marginTop: 8, gap: 16 }}>
+                <span>decisions {s.decisions}</span><span>resolved {s.resolved}</span><span>take {s.take}</span><span>mean R: take {r(s.mean_take)} · all {r(s.mean_all)}</span>
+                <span>{pn.data.left ? `checkpoint in ≥ ${pn.data.left.days} days and ${pn.data.left.resolved} more resolved` : "waiting for the first decision"}</span>
+              </div>
+            </>
+          );
+        })()}
       </Card>
 
       <Card title="Market data" right={<span className="row">

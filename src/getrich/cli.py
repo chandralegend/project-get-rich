@@ -251,6 +251,9 @@ def main(argv: list[str] | None = None) -> int:
     tr.add_argument("--show-packet", action="store_true", help="with --dry-run, print the full desk packet")
     tr.add_argument("--no-refresh", action="store_true", help="skip the data and news refresh that a real run does first (a dry run never refreshes)")
     tr.add_argument("--refresh", action="store_true", help="with --dry-run, refresh data and news first anyway")
+    sub.add_parser("pinet-live", help="the frozen PI-Net scores the newest daily bar for BTC and ETH, records it in the ledger and resolves earlier decisions (pre-registered forward study; needs the models image)")
+    pv = sub.add_parser("pinet-verdict", help="the pre-registered checkpoint of the forward PI-Net study (interim numbers until it is due); --write adds the verdict doc and the trial")
+    pv.add_argument("--write", action="store_true")
     sub.add_parser("trader-score", help="resolve the trader agent's open ideas against the hourly bars that followed them")
     sub.add_parser("trader-card", help="the trader agent's track record: ideas, results by setup and by conviction")
     inv = sub.add_parser("investigate", help="shadow-only research agent (Claude Agent SDK, locked down): web search and fetch plus read-only market tools")
@@ -525,6 +528,30 @@ def main(argv: list[str] | None = None) -> int:
         if res.get("path"):
             print(open(res["path"]).read())
         return 0 if res["status"] == "recorded" else 1
+    if args.cmd == "pinet-live":
+        from .eval import pinet_live
+
+        res = pinet_live.run()
+        for r in res["predictions"]:
+            print(f"{r['symbol']:8} {r['bar']} {r['status']:18} {r.get('call', '')} p={r.get('p')} e={r.get('e')}")
+        print("scored:", res["scored"])
+        return 0
+    if args.cmd == "pinet-verdict":
+        from .eval import pinet_live
+
+        v = pinet_live.verdict(pinet_live.records())
+        print(json.dumps(v, indent=1, default=str))
+        if v["due"] and args.write:
+            from .eval import trials
+
+            sh = pinet_live.daily_sharpe_annual(pinet_live.records())
+            if sh is not None:
+                trials.register(6, "pinet-forward:take", sh, "docs/pinet-forward-verdict.md")
+            (config.root() / "docs" / "pinet-forward-verdict.md").write_text("# Forward PI-Net verdict\n\n```json\n" + json.dumps(v, indent=1, default=str) + "\n```\n")
+            print("wrote docs/pinet-forward-verdict.md")
+        elif args.write:
+            print("not due yet: nothing written")
+        return 0
     if args.cmd == "trader-score":
         from .agents import trader_scoring
 

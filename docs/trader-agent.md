@@ -55,3 +55,8 @@ Why this was added: the hourly classification job stopped at a daily cap of 200 
 Also fixed in the same change: times inside the packet (briefing, flags, findings, journal) were the container's local time (Asia/Colombo) under a UTC heading; they are UTC now, and every event carries `published_hours_ago`.
 
 Not refreshed by a run, on purpose: the forecasters (Kronos, Chronos-2, TimesFM) and the PI-Net. They need torch and model weights, which the Docker image leaves out. The forecast caches are walk-forward results for BTC and ETH made on the host, and each forecast in the packet shows its origin date. There is no live PI-Net output; the models were research, found no edge, and the packet says so.
+
+
+## PI-Net as an input (2026-11-16)
+
+The packet carries a frozen PI-Net's call for BTC and ETH (`markets.<coin>.pinet`: take, skip, or out of domain when the trend rule is not long) and the study's running numbers (`freshness.pinet`). The system prompt tells the trader it has no demonstrated edge and is being scored forward (docs/preregistration-pinet-forward.md), so it is weighed as noise until the pre-registered checkpoint says otherwise. Nothing about the gate, sizing or approvals changes.

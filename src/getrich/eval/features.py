@@ -103,16 +103,24 @@ class Dataset:
         return replace(self, X=self.X[:, keep], columns=cols, channels={n: list(self.channels[n]) for n in names})
 
 
-def build_symbol_frame(symbol: str, daily: pd.DataFrame, hourly: pd.DataFrame, cost: CostModel, *,
-                       tp_mult: float = 2.0, sl_mult: float = 1.0, horizon: int = 10,
-                       primary_min_votes: float | None = None, foundation: pd.DataFrame | None = None, news: pd.DataFrame | None = None) -> pd.DataFrame:
-    """`foundation`: optional features from the pretrained forecasters, indexed by origin bar. When given, only the rows that have them are kept."""
-    rv = har.daily_rv_from_hourly(hourly)
+def feature_frame(symbol: str, daily: pd.DataFrame, hourly: pd.DataFrame, rv: pd.Series | None = None) -> pd.DataFrame:
+    """The model inputs for every daily bar (market, forecast, context). Training rows and the live PI-Net both come from this one function, so
+    they cannot drift apart; every value at a day uses only data up to that day's close."""
+    rv = har.daily_rv_from_hourly(hourly) if rv is None else rv
     har_vol = np.sqrt(har.har_forecast(rv) * 365).reindex(daily.index)
     feats = pd.concat([market_features(daily), forecast_features(daily, har_vol)], axis=1)
     feats["is_eth"] = 1.0 if symbol.startswith("ETH") else 0.0
     dow = daily.index.day_of_week.to_numpy()
     feats["dow_sin"], feats["dow_cos"] = np.sin(2 * np.pi * dow / 7), np.cos(2 * np.pi * dow / 7)
+    return feats[ALL]
+
+
+def build_symbol_frame(symbol: str, daily: pd.DataFrame, hourly: pd.DataFrame, cost: CostModel, *,
+                       tp_mult: float = 2.0, sl_mult: float = 1.0, horizon: int = 10,
+                       primary_min_votes: float | None = None, foundation: pd.DataFrame | None = None, news: pd.DataFrame | None = None) -> pd.DataFrame:
+    """`foundation`: optional features from the pretrained forecasters, indexed by origin bar. When given, only the rows that have them are kept."""
+    rv = har.daily_rv_from_hourly(hourly)
+    feats = feature_frame(symbol, daily, hourly, rv)
 
     sigma = labels.daily_vol(daily["close"])
     lab = labels.triple_barrier(daily, sigma, tp_mult=tp_mult, sl_mult=sl_mult, horizon=horizon, cost=cost)

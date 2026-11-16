@@ -402,7 +402,8 @@ def test_the_packet_reports_how_old_each_input_is_and_labels_every_time_as_utc(h
     f = p["freshness"]
     assert f["news"]["newest_story_hours_ago"] is not None and f["news"]["stories_from_last_24h_not_yet_classified"] >= 0
     assert f["market_data"]["hourly_bar_age_hours"]["oldest"] >= 0
-    assert "no live PI-Net output" in f["pinet"] and f["forecasters"]["covers"].startswith("BTCUSDT")
+    assert f["pinet"]["status"].startswith("forward study") and f["pinet"]["study"]["decisions"] == 0 and f["forecasters"]["covers"].startswith("BTCUSDT")
+    assert p["markets"]["BTCUSDT"]["pinet"] == {"note": "no PI-Net decision recorded yet"}
     assert f["refresh_before_this_run"]["steps"]["news_feeds"]["ok"] is False
     assert p["news"]["events_24h"][0]["published_hours_ago"] == pytest.approx(0.5, abs=0.1)
     assert desk.build_packet()["freshness"]["refresh_before_this_run"] == {"ran": False}

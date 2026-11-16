@@ -107,6 +107,10 @@ def create_app() -> FastAPI:
     def research():
         return guarded(views.research)
 
+    @app.get("/api/pinet")
+    def pinet():
+        return guarded(views.pinet)
+
     @app.get("/api/docs/{directory}/{name}", response_class=PlainTextResponse)
     def doc(directory: str, name: str):
         return guarded(lambda: views.doc(directory, name))

@@ -68,6 +68,7 @@ services:
       - getrich-data:/data
       - getrich-models-hf:/hf:ro
       - ./config/forecast_models.lock.json:/app/config/forecast_models.lock.json:ro
+      - ./docs:/app/docs:ro                    # the pre-registration it checks before recording a PI-Net decision
       - ./models/kronos-src:/app/models/kronos-src:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import json,datetime,sys; h=json.load(open('/data/state/scheduler-models.json'))['heartbeat']; age=(datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(h.replace('Z','+00:00'))).total_seconds(); sys.exit(0 if age < 120 else 1)"]

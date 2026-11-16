@@ -78,6 +78,18 @@ function Detail({ symbol }: { symbol: string }) {
                 <div className="note" style={{ marginTop: 6 }}>Probability of an up move. Tested walk-forward and found to be noise, so read these as a curiosity.</div>
               </Card>
             )}
+            {x.pinet && (
+              <Card title="PI-Net" right={<span className="note">frozen · forward study</span>}>
+                {x.pinet.call ? (
+                  <table><tbody>
+                    <tr><td className="mu">Call ({x.pinet.decision_bar})</td><td className="r">{x.pinet.call.replace(/_/g, " ")}</td></tr>
+                    <tr><td className="mu">Trend votes</td><td className="r num">{(x.pinet.trend_votes * 3).toFixed(0)} of 3</td></tr>
+                    {x.pinet.expected_r != null && <tr><td className="mu">Expected net R / P(win)</td><td className="r num">{x.pinet.expected_r.toFixed(2)} / {Math.round(x.pinet.p_positive * 100)}%</td></tr>}
+                  </tbody></table>
+                ) : <div className="note">{x.pinet.note ?? x.pinet.error}</div>}
+                <div className="note" style={{ marginTop: 6 }}>Scores a long entry only on days the trend rule is long. It showed no edge in history; its live calls are being scored forward (System screen).</div>
+              </Card>
+            )}
             {x.note && <div className="note">{x.note}</div>}
           </>
         )}
