@@ -83,6 +83,15 @@ def create_app() -> FastAPI:
     def bars(symbol: str, timeframe: str = "1h", limit: int = 500):
         return guarded(lambda: views.bars(symbol, timeframe, limit))
 
+    @app.get("/api/signals")
+    def signals(classes: str = ""):
+        cl = tuple(c for c in classes.split(",") if c in ("crypto", "fx", "metal"))
+        return guarded(lambda: views.signals(cl or None))
+
+    @app.get("/api/chart/{symbol}")
+    def chart(symbol: str, tf: str = "1d", limit: int = 180):
+        return guarded(lambda: views.chart(symbol, tf, limit))
+
     @app.get("/api/trader/plans")
     def trader_plans(limit: int = 8):
         return guarded(lambda: views.trader_plans(max(1, min(limit, 40))))

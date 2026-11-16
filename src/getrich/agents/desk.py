@@ -161,7 +161,7 @@ def _scan_row(inst: instruments.Instrument, daily: pd.DataFrame, hourly: pd.Data
         "price": hv["price"], "last_closed_bar_open": hv["last_closed_bar_open"], "ret_24h": hv["ret_24h"], "ret_7d": hv["ret_7d"], "ret_20d": dv["ret_20d"],
         "move_24h_in_daily_sigmas": _r(move_sigma, 2), "vol_20d_annual": dv["vol_20d_annual"], "atr_24h_pct": hv["atr_24h_pct_of_price"],
         "trend_votes_of_3": dv["trend_votes_of_3"], "drawdown_from_90d_high": dv["drawdown_from_90d_high"], "range_position_7d": hv["range_position_7d"],
-        "z_vs_48h_mean": hv["state_facts"]["z_vs_48h_mean"], "round_trip_cost_pct": _r(rt * 100, 3),
+        "z_vs_48h_mean": hv["state_facts"]["z_vs_48h_mean"], "hourly_trend_up": hv["state_facts"]["ema12_above_ema48"], "round_trip_cost_pct": _r(rt * 100, 3),
         "min_stop_pct": _r(max(rules.min_stop_fraction, rt / L.MAX_COST_R) * 100, 2), "note": inst.note or None,
     }
 

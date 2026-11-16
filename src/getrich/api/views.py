@@ -86,6 +86,135 @@ def universe(classes: tuple[str, ...] | None = None) -> dict:
     return cached(f"universe:{classes}", 90, build)
 
 
+def signals(classes: tuple[str, ...] | None = None) -> dict:
+    """The universe with an indicator board per instrument (agents/signals.py): how many indicators point up or down, and what our tests say about each."""
+    classes = tuple(classes) if classes else desk.trader_classes()
+
+    def build():
+        from ..agents import signals as sg
+
+        uni = universe(classes)
+        now = utcnow()
+        with connect() as con:
+            events, _w = briefing.gather_events(con, 24)
+        try:
+            from ..eval import pinet_live
+
+            pn = pinet_live.latest()
+        except Exception:
+            pn = {}
+        rows = []
+        for r in uni["rows"]:
+            if not r.get("available"):
+                rows.append({**r, "board": None})
+                continue
+            sym, extra = r["symbol"], {}
+            if r["class"] == "crypto":
+                extra["news_tilt"] = sg.news_tilt(events, sym)
+            if sym in ("BTCUSDT", "ETHUSDT"):
+                try:
+                    f = desk._forecast_view(sym, desk._bars(sym, "1d"))
+                    ps = [m["prob_up"]["5d"] for m in f.values() if isinstance(m, dict) and m.get("prob_up") and not m.get("stale")]
+                    extra["forecast_prob_up_5d"] = sum(ps) / len(ps) if ps else None
+                except Exception:
+                    pass
+                extra["pinet_call"] = (pn.get(sym) or {}).get("call")
+            rows.append({**r, "board": sg.board(r, extra)})
+        return {"as_of": iso(now), "classes": list(classes), "rows": [x for x in rows if x["class"] in classes], "thresholds": {"buy": sg.BUY_ZONE, "avoid": sg.AVOID_ZONE}}
+    return cached(f"signals:{classes}", 60, build)
+
+
+def chart(symbol: str, timeframe: str = "1d", limit: int = 180) -> dict:
+    """Everything the instrument chart draws: candles, EMA lines, the trend rule's flips, key levels, the forecast fan (BTC and ETH, daily) and our own past calls."""
+    import numpy as np
+
+    from ..eval import baselines
+    inst = instruments.get(symbol)
+    if inst is None:
+        raise KeyError(symbol)
+    if timeframe not in ("1h", "1d"):
+        raise ValueError("timeframe must be 1h or 1d")
+    limit = max(30, min(int(limit), 1000))
+    df = desk._bars(symbol, timeframe)
+    c = df["close"]
+    spans = (16, 64) if timeframe == "1d" else (12, 48)
+    emas = {f"EMA {n}": c.ewm(span=n, adjust=False).mean() for n in spans}
+    view = df.iloc[-limit:]
+    ts = lambda i: int(i.timestamp())
+    out = {"symbol": symbol, "name": inst.name, "timeframe": timeframe,
+           "bars": [{"t": ts(t), "o": float(r.open), "h": float(r.high), "l": float(r.low), "c": float(r.close)} for t, r in view.iterrows()],
+           "ema": [{"name": k, "points": [[ts(t), float(v)] for t, v in s.loc[view.index].items() if np.isfinite(v)]} for k, s in emas.items()],
+           "trend_flips": [], "levels": [], "fan": None, "decisions": [], "pinet": []}
+    if timeframe == "1d":
+        on = baselines.trend_signal(c) >= 2 / 3 - 1e-9
+        flip = on != on.shift(1)
+        for t in view.index[flip.loc[view.index].to_numpy() & (view.index > df.index[0])]:
+            out["trend_flips"].append({"t": ts(t), "kind": "trend_on" if bool(on.loc[t]) else "trend_off"})
+        last = df.iloc[-1]
+        out["levels"] += [{"name": "Prior day high", "price": float(last.high)}, {"name": "Prior day low", "price": float(last.low)},
+                          {"name": "30d high", "price": float(df["high"].iloc[-30:].max())}, {"name": "30d low", "price": float(df["low"].iloc[-30:].min())}]
+        if inst.asset_class == "crypto" and symbol in ("BTCUSDT", "ETHUSDT"):
+            out["fan"] = _fan(symbol, df)
+    else:
+        out["levels"] += [{"name": "24h high", "price": float(df["high"].iloc[-24:].max())}, {"name": "24h low", "price": float(df["low"].iloc[-24:].min())},
+                          {"name": "7d high", "price": float(df["high"].iloc[-168:].max())}, {"name": "7d low", "price": float(df["low"].iloc[-168:].min())}]
+    with connect() as con:
+        rows = con.execute("SELECT as_of, asset, payload FROM insights WHERE json_extract_string(payload, '$.kind') = 'trade_idea' ORDER BY seq DESC LIMIT 300").fetchall()
+    for as_of, asset, payload in rows:
+        p = json.loads(payload)
+        if trader_scoring.symbol_of(asset, p) == symbol:
+            out["decisions"].append({"t": ts(as_of), "action": p.get("action"), "conviction": p.get("conviction")})
+    out["decisions"].reverse()
+    try:
+        from ..eval import pinet_live
+
+        out["pinet"] = [{"t": int(pd_ts(r["date"])), "call": r["call"]} for r in pinet_live.records() if r["symbol"] == symbol]
+    except Exception:
+        pass
+    return out
+
+
+def pd_ts(date: str) -> float:
+    import pandas as pd
+
+    return pd.Timestamp(date, tz="UTC").timestamp()
+
+
+def _fan(symbol: str, daily) -> dict | None:
+    """The newest forecast origin of each model as a price fan: 10th, 50th and 90th percentile at +1, +5 and +20 days, plus the models' average."""
+    import numpy as np
+
+    from ..forecast.base import HORIZONS, QUANTILES, load_cache
+
+    models, origin = {}, None
+    for name in ("chronos2", "timesfm25", "kronos_small"):
+        try:
+            cache = load_cache(name, symbol)
+        except Exception:
+            continue
+        if cache is None or len(cache) == 0:
+            continue
+        o = pd_ts(str(np.datetime_as_string(cache.origins.max(), unit="D")))
+        origin = o if origin is None else max(origin, o)
+        cube = cache.cube[int(np.argmax(cache.origins))]                     # (horizons, quantiles) of cumulative log return
+        models[name] = {"origin": o, "q": {int(h): {f"p{int(q * 100)}": float(cube[j, k]) for k, q in enumerate(QUANTILES)} for j, h in enumerate(HORIZONS)}}
+    if not models:
+        return None
+    row = daily.loc[daily.index <= pd_ts_index(origin)].iloc[-1]
+    base = float(row["close"])
+    avg = {h: {k: float(np.mean([m["q"][h][k] for m in models.values()])) for k in next(iter(models.values()))["q"][h]} for h in HORIZONS}
+    px = lambda lr: base * float(np.exp(lr))
+    return {"origin": int(origin), "base": base, "stale_days": int((daily.index[-1].timestamp() - origin) // 86400),
+            "points": [{"h": h, "t": int(origin + h * 86400), **{k: px(v) for k, v in avg[h].items()},
+                        "models": {n: {k: px(v) for k, v in m["q"][h].items()} for n, m in models.items()}} for h in HORIZONS]}
+
+
+def pd_ts_index(epoch: float):
+    import pandas as pd
+
+    return pd.Timestamp(epoch, unit="s", tz="UTC")
+
+
 def bars(symbol: str, timeframe: str = "1h", limit: int = 500) -> dict:
     inst = instruments.get(symbol)
     if inst is None:
@@ -153,7 +282,7 @@ def trader_plans(limit: int = 8) -> dict:
     for iid, as_of, payload in plans:
         p = json.loads(payload)
         out.append({"insight_id": iid, "as_of": iso(as_of), "plan_id": p["plan_id"], "regime": p["regime"], "narrative": p["narrative"], "main_risks": p["main_risks"], "edge_check": p["edge_check"],
-                    "stance": p["stance"], "universe_view": p.get("universe_view"), "watchlist": p["watchlist"], "review_of_past_calls": p["review_of_past_calls"], "dropped": p.get("dropped", []),
+                    "stance": p["stance"], "universe_view": p.get("universe_view"), "watchlist": p["watchlist"], "triggers": p.get("triggers", []), "review_of_past_calls": p["review_of_past_calls"], "dropped": p.get("dropped", []),
                     "cost_usd": p.get("cost_usd"), "packet_ref": p.get("packet_ref"), "ideas": by_plan.get(p["plan_id"], [])})
     return {"plans": out, "card": card}
 

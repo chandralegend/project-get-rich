@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { get, post, useApi, Json } from "../api";
 import { go } from "../App";
 import { ActionButton, Card, Empty, fmt, Loading, Pill, Table, tone } from "../ui";
+import { Gauge, InstrumentChart, MEANING, Triggers, Votes, Zone, ZONE_LABEL, triggerState, zoneColor } from "../visual";
 
 const CLASSES = [["crypto", "Crypto"], ["fx", "Forex"], ["metal", "Gold & silver"]] as const;
 const actionTone = (a: string) => (a === "open_long" ? "up" : a === "open_short" ? "warn" : a === "exit" || a === "reduce" ? "dn" : "") as "" | "up" | "dn" | "warn";
@@ -113,44 +114,157 @@ function Idea({ it, onProposed }: { it: Json; onProposed: (r: Json) => void }) {
   );
 }
 
+/** The one-glance answer: what the trader says to do now, how our indicators lean across the whole universe, and what it is waiting for. */
+function Hero({ plan, rows, prices, onFocus }: { plan: Json | undefined; rows: Json[]; prices: Record<string, number>; onFocus: (s: string) => void }) {
+  const ideas: Json[] = plan?.ideas ?? [];
+  const buys = ideas.filter((i) => i.action === "open_long" && i.tradable && i.gate_whatif?.approved && !i.outcome);
+  const exits = ideas.filter((i) => ["exit", "reduce"].includes(i.action));
+  const state = buys.length ? "BUY CANDIDATE" : exits.length ? "EXIT / REDUCE" : "WAIT";
+  const color = buys.length ? "var(--up)" : exits.length ? "var(--dn)" : "var(--warn)";
+  const zones = { buy: 0, wait: 0, avoid: 0, no_read: 0 } as Record<Zone, number>;
+  rows.forEach((r) => { zones[(r.board?.zone ?? "no_read") as Zone] += 1; });
+  const total = Math.max(1, rows.length);
+  const trig: Json[] = (plan?.triggers ?? []).map((t: Json) => ({ ...t, st: triggerState(t, prices[t.instrument]) })).filter((t: Json) => t.st.dist != null && !t.st.met);
+  const closest = [...trig].sort((a, b) => (a.meaning === "buy_candidate" ? 0 : 1) - (b.meaning === "buy_candidate" ? 0 : 1) || Math.abs(a.st.dist) - Math.abs(b.st.dist))[0];
+  const ageMin = plan ? (Date.now() - new Date(plan.as_of).getTime()) / 60000 : null;
+  return (
+    <section className="card hero">
+      <div className="hero-state" style={{ borderColor: color }}>
+        <div className="hero-word" style={{ color }}>{state}</div>
+        <div className="note">{!plan ? "No plan yet. Run the trader." : buys.length ? `${buys.map((b) => b.instrument).join(", ")}: the gate approved a size. Propose it below, then approve it on Orders.` : exits.length ? `Close or trim ${exits.map((b) => b.instrument).join(", ")}.` : `${plan.stance.risk_posture} · cash target ${fmt.pct(plan.stance.cash_target_fraction, 0)} · market ${plan.regime}`}</div>
+        {plan && <div className={`note ${ageMin != null && ageMin > 360 ? "warn" : ""}`}>plan made {fmt.ago(plan.as_of)}{ageMin != null && ageMin > 360 ? " · old, run it again" : ""}</div>}
+      </div>
+      <div className="hero-tile">
+        <div className="l">Our indicators across {rows.length} instruments</div>
+        <div className="stack" role="img" aria-label={`${zones.buy} buy zone, ${zones.wait} wait, ${zones.avoid} avoid`}>
+          <i style={{ width: `${(zones.buy / total) * 100}%`, background: "var(--up)" }} /><i style={{ width: `${(zones.wait / total) * 100}%`, background: "var(--warn)" }} /><i style={{ width: `${(zones.avoid / total) * 100}%`, background: "var(--dn)" }} /><i style={{ width: `${(zones.no_read / total) * 100}%`, background: "var(--line2)" }} />
+        </div>
+        <div className="row note num" style={{ gap: 12 }}><span style={{ color: "var(--up)" }}>{zones.buy} buy</span><span style={{ color: "var(--warn)" }}>{zones.wait} wait</span><span style={{ color: "var(--dn)" }}>{zones.avoid} avoid</span></div>
+      </div>
+      <div className="hero-tile">
+        <div className="l">What it is waiting for</div>
+        {!closest ? <div className="note">{plan ? "No open triggers in this plan." : "–"}</div> : (
+          <button className="linkish" onClick={() => onFocus(closest.instrument)}>
+            <div><b>{closest.instrument.replace("USDT", "")}</b> <span className="num">{closest.direction === "above" ? "↑" : "↓"} {fmt.price(closest.level)}</span></div>
+            <div className="tbar"><i style={{ width: `${Math.max(0, Math.min(1, 1 - Math.abs(closest.st.dist) / 0.1)) * 100}%`, background: MEANING[closest.meaning]?.color ?? "var(--ac)" }} /></div>
+            <div className="note">needs <b className="num">{fmt.pct(Math.abs(closest.st.dist), 1)}</b> {closest.direction === "above" ? "higher" : "lower"} · {MEANING[closest.meaning]?.label ?? closest.meaning}</div>
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MeterGrid({ rows, focus, onFocus, ideaBySym }: { rows: Json[]; focus: string | null; onFocus: (s: string) => void; ideaBySym: Record<string, Json> }) {
+  const sorted = [...rows].sort((a, b) => (b.board?.score ?? -9) - (a.board?.score ?? -9));
+  return (
+    <div className="meters">
+      {sorted.map((r) => {
+        const b = r.board, z = (b?.zone ?? "no_read") as Zone, idea = ideaBySym[r.symbol];
+        return (
+          <button key={r.symbol} className={`meter ${focus === r.symbol ? "on" : ""}`} onClick={() => onFocus(r.symbol)} aria-label={`${r.symbol} ${ZONE_LABEL[z]}`}>
+            <div className="row" style={{ gap: 6 }}><b>{r.symbol.replace("USDT", "")}</b><span className="sp" /><span className={`num ${tone(r.ret_24h)}`}>{fmt.pct(r.ret_24h, 1, true)}</span></div>
+            <Gauge score={b?.score ?? null} zone={z} size="sm" buy={0.35} avoid={-0.35} />
+            <div className="note num">{fmt.price(r.price)}</div>
+            <div className="note num">{b ? <><span style={{ color: "var(--up)" }}>▲{b.up}</span> <span style={{ color: "var(--dn)" }}>▼{b.down}</span> <span>of {b.n}</span></> : "no data"}</div>
+            {idea && <span className="mtag" style={{ color: idea.action === "open_long" ? "var(--up)" : "var(--mu)" }}>{idea.action === "open_long" ? "buy idea" : idea.action.replace("_", " ")}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Focus({ symbol, row, plan, triggers, prices, onProposed }: { symbol: string; row: Json | undefined; plan: Json | undefined; triggers: Json[]; prices: Record<string, number>; onProposed: (r: Json) => void }) {
+  const b = row?.board, z = (b?.zone ?? "no_read") as Zone;
+  const idea = (plan?.ideas ?? []).find((i: Json) => i.instrument === symbol);
+  return (
+    <div className="grid g21">
+      <div className="grid" style={{ alignContent: "start" }}>
+        <Card title={<>{symbol}{row && <span className="mu" style={{ textTransform: "none", letterSpacing: 0 }}> {row.name}</span>}</>} right={row && <span className="num">{fmt.price(row.price)} <span className={tone(row.ret_24h)}>{fmt.pct(row.ret_24h, 2, true)}</span></span>}>
+          <InstrumentChart symbol={symbol} triggers={triggers} />
+        </Card>
+        <Card title="The signals behind the needle" right={<span className="note">hover a row for what our tests found</span>}>
+          {b ? <Votes votes={b.votes} /> : <Empty>No data for this instrument.</Empty>}
+        </Card>
+      </div>
+      <div className="grid" style={{ alignContent: "start" }}>
+        <Card title="Indicator agreement" right={<span className="note">not a forecast</span>}>
+          <div className="row" style={{ justifyContent: "center" }}><Gauge score={b?.score ?? null} zone={z} size="lg" /></div>
+          {b && <div className="row note num" style={{ justifyContent: "center", gap: 14, marginTop: 4 }}><span style={{ color: "var(--up)" }}>▲ {b.up} up</span><span style={{ color: "var(--dn)" }}>▼ {b.down} down</span><span>{b.n - b.up - b.down} neutral</span><span>score {b.score?.toFixed(2) ?? "–"}</span></div>}
+          <div className="note" style={{ marginTop: 6 }}>How many of our indicators point the same way. None has a demonstrated edge, so a green needle is a reason to look, not a reason to buy. Buy zone from +0.35, avoid zone from −0.35.</div>
+        </Card>
+        <Card title="Trader's call">
+          {!idea ? <div className="note">{plan ? "Not discussed in the latest plan: it passed on this instrument." : "No plan yet."}</div> : (
+            <div className="grid" style={{ gap: 6 }}>
+              <div className="row"><Pill tone={idea.action === "open_long" ? "up" : idea.action === "wait" ? "warn" : "dn"}>{idea.action.replace("_", " ")}</Pill><span className="note">conviction</span><span className="bar" style={{ width: 70 }}><i style={{ width: `${Math.round(idea.conviction * 100)}%` }} /></span><span className="num mu">{idea.conviction.toFixed(2)}</span></div>
+              <div className="note">{idea.thesis}</div>
+              {idea.action === "wait" && <div className="note"><b>Wrong if / re-look:</b> {idea.invalidation}</div>}
+              {idea.gate_whatif && <div className="note">{idea.gate_whatif.approved ? <span className="up">Gate would approve {idea.gate_whatif.qty} units (${idea.gate_whatif.notional?.toFixed(2)}), ${idea.gate_whatif.risk_amount?.toFixed(2)} at risk.</span> : <span className="dn">Gate would refuse: {idea.gate_whatif.reasons?.join("; ")}</span>}</div>}
+              {idea.action === "open_long" && idea.tradable && !idea.outcome && <ActionButton className="btn sm primary" label="Propose to gate" run={() => post(`/api/ideas/${idea.insight_id}/propose`)} onDone={onProposed} />}
+            </div>
+          )}
+        </Card>
+        <Card title="Wait until"><Triggers triggers={triggers} prices={prices} only={symbol} /></Card>
+      </div>
+    </div>
+  );
+}
+
 export default function Trader() {
   const plans = useApi("/api/trader/plans?limit=10", 20000);
+  const sig = useApi("/api/signals", 60000);
   const [sel, setSel] = useState(0);
   const [packet, setPacket] = useState<Json | null>(null);
   const [proposed, setProposed] = useState<Json | null>(null);
+  const [focusSym, setFocusSym] = useState<string | null>(null);
   if (!plans.data) return <Loading error={plans.error} />;
-  const list: Json[] = plans.data.plans, plan = list[sel], card = plans.data.card;
+  const list: Json[] = plans.data.plans, plan = list[sel], latest = list[0], card = plans.data.card;
+  const rows: Json[] = (sig.data?.rows ?? []).filter((r: Json) => r.available);
+  const prices: Record<string, number> = Object.fromEntries(rows.filter((r) => r.price).map((r) => [r.symbol, r.price]));
+  const focus = focusSym ?? (rows.find((r) => r.symbol === "BTCUSDT") ?? rows[0])?.symbol ?? null;
+  const ideaBySym: Record<string, Json> = Object.fromEntries((latest?.ideas ?? []).map((i: Json) => [i.instrument, i]));
+  const triggers: Json[] = latest?.triggers ?? [];
 
   return (
     <>
-      <RunPanel onFinished={() => { plans.reload(); setSel(0); }} />
+      <RunPanel onFinished={() => { plans.reload(); sig.reload(); setSel(0); }} />
       {proposed && (
         <div className={`banner ${proposed.verdict.approved ? "warn" : "dn"}`}>
           {proposed.verdict.approved ? <><b>Proposal created.</b><span>{proposed.verdict.qty} units, gate approved. It expires in 15 minutes.</span><button className="btn sm primary" onClick={() => go("orders")}>Review and approve</button></> : <><b>The gate refused it:</b><span>{proposed.verdict.reasons.join("; ")}</span></>}
           <span className="sp" /><button className="btn sm" onClick={() => setProposed(null)}>Dismiss</button>
         </div>
       )}
+      <Hero plan={latest} rows={rows} prices={prices} onFocus={setFocusSym} />
+      {sig.data ? (rows.length > 0 && <MeterGrid rows={rows} focus={focus} onFocus={setFocusSym} ideaBySym={ideaBySym} />) : <Loading error={sig.error} />}
+      {focus && <Focus symbol={focus} row={rows.find((r) => r.symbol === focus)} plan={latest} triggers={triggers} prices={prices} onProposed={setProposed} />}
+
       {!plan ? <Card><Empty>No plans yet. Run the trader above.</Empty></Card> : (
         <div className="grid g21">
           <div className="grid">
-            <Card title={<>Plan · {fmt.time(plan.as_of)}</>} right={<span className="note">{fmt.ago(plan.as_of)} · ${plan.cost_usd?.toFixed(3)}</span>}>
+            <Card title={<>Written plan · {fmt.time(plan.as_of)}</>} right={<span className="note">{fmt.ago(plan.as_of)} · ${plan.cost_usd?.toFixed(3)}</span>}>
               <div className="row" style={{ marginBottom: 8 }}>
                 <Pill tone={plan.regime === "stressed" ? "dn" : plan.regime.startsWith("trending") ? "ac" : ""}>{plan.regime}</Pill>
                 <Pill>{plan.stance.risk_posture}</Pill><span className="note">cash target {fmt.pct(plan.stance.cash_target_fraction, 0)}</span>
               </div>
-              <p style={{ margin: "0 0 10px" }}>{plan.narrative}</p>
-              <div className="banner" style={{ marginBottom: 10 }}><b>Edge check</b><span>{plan.edge_check}</span></div>
-              <div className="note" style={{ marginBottom: 4 }}><b>What it looked at and passed on.</b></div>
-              <p style={{ margin: "0 0 4px" }}>{plan.universe_view}</p>
+              <div className="banner" style={{ marginBottom: 8 }}><b>Edge check</b><span>{plan.edge_check}</span></div>
+              <details><summary>Read the full reasoning</summary>
+                <p style={{ margin: "8px 0 10px" }}>{plan.narrative}</p>
+                <div className="note" style={{ marginBottom: 4 }}><b>What it looked at and passed on.</b></div>
+                <p style={{ margin: "0 0 4px" }}>{plan.universe_view}</p>
+              </details>
             </Card>
-            <Card title={`Ideas (${plan.ideas.length})`}>
-              {plan.ideas.length === 0 ? <Empty>No ideas kept in this plan.</Empty> : <div className="grid" style={{ gap: 10 }}>{plan.ideas.map((i: Json) => <Idea key={i.insight_id} it={i} onProposed={setProposed} />)}</div>}
-              {plan.dropped?.length > 0 && <div className="note" style={{ marginTop: 10 }}>Corrected by validation: {plan.dropped.join(" · ")}</div>}
-            </Card>
+            {plan.ideas.length > 0 && (
+              <Card title={`Ideas (${plan.ideas.length})`}>
+                <div className="grid" style={{ gap: 10 }}>{plan.ideas.map((i: Json) => <Idea key={i.insight_id} it={i} onProposed={setProposed} />)}</div>
+                {plan.dropped?.length > 0 && <div className="note" style={{ marginTop: 10 }}>Corrected by validation: {plan.dropped.join(" · ")}</div>}
+              </Card>
+            )}
             <div className="grid g2">
-              <Card title="Main risks"><ul style={{ margin: 0, paddingLeft: 18 }}>{plan.main_risks.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul></Card>
-              <Card title="Watchlist"><ul style={{ margin: 0, paddingLeft: 18 }}>{plan.watchlist.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul></Card>
+              <Card title="Main risks"><ul className="tight">{plan.main_risks.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul></Card>
+              <Card title="Watchlist"><ul className="tight">{plan.watchlist.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul></Card>
             </div>
+            <Card title="Triggers in this plan"><Triggers triggers={plan.triggers ?? []} prices={prices} /></Card>
             <Card title="Review of its past calls"><p style={{ margin: 0 }}>{plan.review_of_past_calls}</p></Card>
             {plan.packet_ref && <Inputs key={plan.packet_ref} pref={plan.packet_ref} />}
             <Card title="What it saw" right={plan.packet_ref && <button className="btn sm" onClick={async () => setPacket(packet ? null : await get(`/api/trader/packet/${plan.packet_ref}`))}>{packet ? "Hide" : "Show the exact input"}</button>}>

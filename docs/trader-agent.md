@@ -60,3 +60,15 @@ Not refreshed by a run, on purpose: the forecasters (Kronos, Chronos-2, TimesFM)
 ## PI-Net as an input (2026-11-16)
 
 The packet carries a frozen PI-Net's call for BTC and ETH (`markets.<coin>.pinet`: take, skip, or out of domain when the trend rule is not long) and the study's running numbers (`freshness.pinet`). The system prompt tells the trader it has no demonstrated edge and is being scored forward (docs/preregistration-pinet-forward.md), so it is weighed as noise until the pre-registered checkpoint says otherwise. Nothing about the gate, sizing or approvals changes.
+
+
+## The visual Trader screen (2026-11-16)
+
+The Trader screen leads with pictures and keeps the written plan below it.
+
+- **Decision strip:** WAIT, BUY CANDIDATE (only when an idea is tradable and the gate approved a size) or EXIT / REDUCE; a stacked bar of how our indicators lean across the universe; and the closest trigger with a progress bar.
+- **A meter per instrument:** a half-circle gauge from SELL / AVOID through WAIT to BUY. The needle is the plain average of the indicator votes in `agents/signals.py` (daily trend, hourly trend, 7-day momentum, place in the week's range, stretch vs the 48h mean, the forecast models, the PI-Net call, news tone), each scaled to -1..+1. Buy zone from +0.35, avoid zone from -0.35. It is **agreement, not a forecast**: every vote carries what our own tests found (only the daily trend has "weak evidence", the rest are "unproven"), and the screen says so. The trader's call and the risk gate decide what happens.
+- **Chart with overlays:** candles, EMAs, key levels, the daily trend rule's flips (trend on / off arrows), the forecast fan for BTC and ETH (average of the three models' 10th, 50th and 90th percentiles at +1, +5 and +20 days, straight lines between horizons), the trader's triggers and its past calls.
+- **Wait until:** the plan now includes `triggers`: 2 to 6 concrete price levels (above or below, confirmed on a daily close, hourly close or touch) with what each would mean (reconsider a buy, stay out, exit or avoid, trend change). The screen draws them on the chart and shows the distance from the live price. Triggers more than 35% from the price, already passed, or without a price are dropped. Nothing fires an order: they are a visual checklist.
+
+API: `/api/signals` (boards for the universe), `/api/chart/{symbol}?tf=1d|1h` (chart layers).

@@ -133,3 +133,37 @@ def test_jobs_run_one_at_a_time_and_record_their_exit(tt_home):
     assert jobs.get(j["id"])["status"] == "done" and jobs.get(j["id"])["exit_code"] == 0
     with pytest.raises(ValueError):
         jobs.start("rm-rf", [])
+
+
+def test_the_signal_board_and_chart_endpoints_give_the_screens_what_they_draw(client):
+    sg = client.get("/api/signals?classes=crypto").json()
+    btc = next(r for r in sg["rows"] if r["symbol"] == "BTCUSDT")
+    assert btc["board"]["zone"] in ("buy", "wait", "avoid", "no_read") and btc["board"]["votes"] and {"buy", "avoid"} <= set(sg["thresholds"])
+    assert all(v["proof"] in ("none", "weak") for v in btc["board"]["votes"])
+    ch = client.get("/api/chart/BTCUSDT?tf=1d&limit=120").json()
+    assert len(ch["bars"]) == 120 and ch["bars"][0]["t"] < ch["bars"][-1]["t"]
+    assert [e["name"] for e in ch["ema"]] == ["EMA 16", "EMA 64"] and len(ch["ema"][0]["points"]) == 120
+    assert {l["name"] for l in ch["levels"]} == {"Prior day high", "Prior day low", "30d high", "30d low"}
+    assert all(f["kind"] in ("trend_on", "trend_off") for f in ch["trend_flips"])
+    assert client.get("/api/chart/BTCUSDT?tf=1h&limit=100").json()["ema"][0]["name"] == "EMA 12"
+    assert client.get("/api/chart/NOPE").status_code == 404 and client.get("/api/chart/BTCUSDT?tf=5m").status_code == 400
+
+
+def test_the_chart_fan_is_built_from_the_newest_forecast_of_each_model(client):
+    from getrich.forecast.base import Cache, HORIZONS, QUANTILES, save_cache
+    import numpy as np
+    from getrich.eval.data import load_bars
+
+    bars = load_bars("BTCUSDT", "1d")
+    origin = np.array([bars.index[-3].tz_localize(None).to_datetime64()], dtype="datetime64[ns]")
+    cube = np.zeros((1, len(HORIZONS), len(QUANTILES)), dtype=np.float32)
+    for k, q in enumerate(QUANTILES):
+        cube[0, :, k] = (q - 0.5) * 0.2
+    for name in ("chronos2", "timesfm25"):
+        save_cache(Cache(name, "BTCUSDT", origin, cube))
+    views.clear_cache()
+    fan = client.get("/api/chart/BTCUSDT?tf=1d").json()["fan"]
+    assert fan and [p["h"] for p in fan["points"]] == list(HORIZONS) and set(fan["points"][0]["models"]) == {"chronos2", "timesfm25"}
+    p20 = fan["points"][-1]
+    assert p20["p10"] < p20["p50"] < p20["p90"] and p20["p50"] == pytest.approx(fan["base"], rel=1e-6) and fan["stale_days"] == 2
+    assert client.get("/api/chart/ETHUSDT?tf=1d").json()["fan"] is None                 # no ETH cache was written
